@@ -246,6 +246,19 @@ def validate_tool_summary(md: str) -> list[str]:
     return problems
 
 
+def validate_outline(md: str) -> list[str]:
+    problems: list[str] = []
+    if len(md.strip()) < 400:
+        problems.append("too_short")
+    # Require at least one heading to avoid useless blobs
+    if "#" not in md:
+        problems.append("missing_headings")
+    # Often indicates model refused / answered generically
+    if md.strip().lower().startswith("i can") or md.strip().lower().startswith("sorry"):
+        problems.append("refusal_or_meta")
+    return problems
+
+
 def validate_execution_notes(md: str) -> list[str]:
     problems: list[str] = []
     if not md.lstrip().startswith("#"):
@@ -523,6 +536,23 @@ def main() -> int:
                     gateway_token=gateway_token,
                     agent_id=args.gateway_agent_id,
                 )
+
+                if args.validate:
+                    probs = validate_outline(outline_md)
+                    if probs:
+                        outline_md = generate_with_retries(
+                            engine=args.engine,
+                            retries=0,
+                            sleep_s=args.retry_sleep,
+                            prompt=prompts.outline + text,
+                            max_tokens=args.outline_max_tokens,
+                            ollama_url=args.ollama_url,
+                            ollama_model=args.ollama_model,
+                            gateway_url=args.gateway_url,
+                            gateway_token=gateway_token,
+                            agent_id=args.gateway_agent_id,
+                        )
+
                 outline_out.write_text(outline_md + "\n", encoding="utf-8")
                 source_for_stage_b = outline_md
 
