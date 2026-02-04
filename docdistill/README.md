@@ -1,6 +1,6 @@
-# DocPipe (CLI)
+# DocDistill (CLI)
 
-DocPipe is a local CLI that converts documentation into two markdown artifacts per file:
+DocDistill is a local CLI that converts documentation into two markdown artifacts per file:
 
 1) `*.execution-notes.md` — condensed, execution-relevant notes for an agent/tool-runner.
 2) `*.tool-summary.md` — ultra-condensed description for library indexing.
@@ -15,7 +15,7 @@ Outputs are generated via **local Ollama**.
 ## Install deps
 
 ```bash
-cd docpipe
+cd docdistill
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -24,9 +24,12 @@ pip install -r requirements.txt
 ## Run
 
 ```bash
-cd docpipe
+cd docdistill
 source .venv/bin/activate
-python docpipe_cli.py <file-or-folder> --out ./docpipe_out --model llama3.2:3b
+python docdistill_cli.py <file-or-folder> --out ./docdistill_out --engine openclaw
+
+# or fully-local
+python docdistill_cli.py <file-or-folder> --out ./docdistill_out --engine ollama --ollama-model llama3.2:3b
 ```
 
 Notes:

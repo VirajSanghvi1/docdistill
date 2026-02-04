@@ -170,9 +170,9 @@ def rel_output_path(input_path: Path, input_root: Path, out_root: Path, suffix: 
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="DocPipe CLI: extract docs -> execution-notes.md + tool-summary.md")
+    ap = argparse.ArgumentParser(description="DocDistill CLI: extract docs -> execution-notes.md + tool-summary.md")
     ap.add_argument("input", help="File or directory to process")
-    ap.add_argument("--out", default="./docpipe_out", help="Output directory")
+    ap.add_argument("--out", default="./docdistill_out", help="Output directory")
     ap.add_argument("--engine", choices=["ollama", "openclaw"], default="ollama", help="Generation engine")
 
     ap.add_argument("--ollama-url", default=DEFAULT_OLLAMA_URL)
