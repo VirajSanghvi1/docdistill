@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+import fnmatch
+import hashlib
 import json
 import os
 import sys
@@ -13,7 +15,6 @@ from typing import Iterable
 
 from extract import extract_file
 
-
 DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
 DEFAULT_OLLAMA_MODEL = "llama3.2:3b"
 DEFAULT_GATEWAY_URL = "http://127.0.0.1:18789"
@@ -21,12 +22,40 @@ DEFAULT_GATEWAY_URL = "http://127.0.0.1:18789"
 
 @dataclass
 class Prompts:
+    outline: str
     execution_notes: str
     tool_summary: str
 
 
-def build_prompts(*, token_cap_hint: str, exec_max_tokens: int, summary_max_tokens: int) -> Prompts:
-    # Keep prompts short and execution-focused.
+def build_prompts(*, token_cap_hint: str, outline_max_tokens: int, exec_max_tokens: int, summary_max_tokens: int) -> Prompts:
+    # Stage A: loss-minimized outline. Keep very explicit, ban prose.
+    outline = f"""You are converting documentation into a LOSS-MINIMIZED, low-fluff OUTLINE for an executor AI.
+
+Return ONLY markdown.
+
+FORMAT:
+- Use headings to preserve structure.
+- Under each heading, only use bullet lists.
+- Prefer exact names, symbols, commands, function names, parameters, file paths.
+
+For each section, prioritize these bullets (when present):
+- Definitions / key terms
+- Interfaces (commands/APIs/classes/functions) + important fields/flags
+- Procedures (step lists)
+- Constraints/assumptions
+- Failure modes / gotchas
+- Examples (short)
+
+RULES:
+- No marketing prose. No table of contents. No change log.
+- Keep as much factual content as possible.
+- Target <= {outline_max_tokens} output tokens.
+
+SOURCE (extracted text) below:
+---
+"""
+
+    # Stage B1: execution notes (from outline if enabled)
     execution_notes = f"""You are an expert at converting documentation into EXECUTION-RELEVANT notes for an AI agent that can run tools (CLI commands, HTTP calls, scripts, functions).
 
 Return ONLY markdown.
@@ -52,6 +81,7 @@ SOURCE (extracted text) below:
 ---
 """
 
+    # Stage B2: tool index entry (template)
     tool_summary = f"""You are an expert at writing ULTRA-CONDENSED, AI-readable TOOL INDEX entries.
 
 Return ONLY markdown, and ONLY the filled-in TEMPLATE below.
@@ -79,14 +109,16 @@ TEMPLATE (replace the angle-bracket placeholders; keep headings verbatim):
 RULES:
 - No table of contents, no prose summary, no history, no change log.
 - Prefer symbols, backticks, and short bullets over sentences.
+- Rewrite commands is OK, but reference the real command/name/path when the doc provides it.
 - If the doc describes multiple components, choose the primary "tool" and mention others only as bullets.
+- If a dependency/entrypoint is not explicitly in the source, write `Unknown`.
 - Target <= {summary_max_tokens} output tokens.
 
 SOURCE (extracted text) below:
 ---
 """
 
-    return Prompts(execution_notes=execution_notes, tool_summary=tool_summary)
+    return Prompts(outline=outline, execution_notes=execution_notes, tool_summary=tool_summary)
 
 
 def iter_input_files(root: Path) -> Iterable[Path]:
@@ -110,6 +142,10 @@ def post_json(url: str, data: dict, timeout: int = 120, headers: dict[str, str] 
         return json.loads(resp.read().decode("utf-8"))
 
 
+def sha256_text(s: str) -> str:
+    return hashlib.sha256(s.encode("utf-8", errors="ignore")).hexdigest()
+
+
 def ollama_generate(*, ollama_url: str, model: str, prompt: str, num_predict: int) -> str:
     data = post_json(
         f"{ollama_url}/api/generate",
@@ -118,9 +154,7 @@ def ollama_generate(*, ollama_url: str, model: str, prompt: str, num_predict: in
             "prompt": prompt,
             "stream": False,
             "options": {
-                # cap output length
                 "num_predict": num_predict,
-                # keep things stable-ish
                 "temperature": 0.2,
             },
         },
@@ -130,7 +164,6 @@ def ollama_generate(*, ollama_url: str, model: str, prompt: str, num_predict: in
 
 
 def openclaw_generate(*, gateway_url: str, gateway_token: str, agent_id: str, prompt: str, max_output_tokens: int) -> str:
-    # OpenResponses API served by the local OpenClaw Gateway.
     data = post_json(
         f"{gateway_url}/v1/responses",
         {
@@ -145,7 +178,6 @@ def openclaw_generate(*, gateway_url: str, gateway_token: str, agent_id: str, pr
         },
     )
 
-    # Non-streaming response aggregates assistant output in output[].content[].text
     out_parts: list[str] = []
     for item in data.get("output") or []:
         if item.get("type") != "message":
@@ -157,22 +189,185 @@ def openclaw_generate(*, gateway_url: str, gateway_token: str, agent_id: str, pr
     return "\n".join(out_parts).strip()
 
 
+def generate_with_retries(*, engine: str, retries: int, sleep_s: float, prompt: str, max_tokens: int, ollama_url: str, ollama_model: str, gateway_url: str, gateway_token: str, agent_id: str) -> str:
+    last_err: Exception | None = None
+    for attempt in range(retries + 1):
+        try:
+            if engine == "ollama":
+                return ollama_generate(ollama_url=ollama_url, model=ollama_model, prompt=prompt, num_predict=max_tokens)
+            return openclaw_generate(gateway_url=gateway_url, gateway_token=gateway_token, agent_id=agent_id, prompt=prompt, max_output_tokens=max_tokens)
+        except Exception as e:
+            last_err = e
+            if attempt < retries:
+                time.sleep(sleep_s * (attempt + 1))
+                continue
+            raise
+    raise RuntimeError(str(last_err))
+
+
 def rel_output_path(input_path: Path, input_root: Path, out_root: Path, suffix: str) -> Path:
     if input_root.is_file():
         rel = input_path.name
     else:
         rel = str(input_path.relative_to(input_root))
 
-    # normalize: replace extension with suffix
     base = Path(rel)
     out_rel = base.with_suffix("")
     return out_root / out_rel.parent / (out_rel.name + suffix)
+
+
+def matches_any(path_str: str, patterns: list[str]) -> bool:
+    return any(fnmatch.fnmatch(path_str, pat) for pat in patterns)
+
+
+def validate_tool_summary(md: str) -> list[str]:
+    # Minimal structural validation (keeps us from silently accepting garbage).
+    problems: list[str] = []
+    required = [
+        "# ",
+        "**Purpose:**",
+        "**Capabilities:**",
+        "**Requires:**",
+        "**Entrypoints:**",
+        "**Limits / footguns:**",
+    ]
+    for r in required:
+        if r not in md:
+            problems.append(f"missing:{r}")
+
+    # place-holder leakage
+    if "<TOOL_NAME>" in md or "<ONE_SENTENCE>" in md or "<BULLET" in md:
+        problems.append("contains_placeholders")
+
+    # too short tends to mean it failed / got truncated into junk
+    if len(md.strip()) < 120:
+        problems.append("too_short")
+
+    return problems
+
+
+def validate_execution_notes(md: str) -> list[str]:
+    problems: list[str] = []
+    if not md.lstrip().startswith("#"):
+        problems.append("missing_title")
+    if "Golden path" not in md and "golden path" not in md:
+        problems.append("missing_golden_path")
+    if len(md.strip()) < 300:
+        problems.append("too_short")
+    return problems
+
+
+def shard_outline_to_nodes(*, outline_md: str, nodes_dir: Path, max_node_chars: int = 6000) -> list[Path]:
+    """Split by H2 headings into atomic-ish nodes."""
+    nodes_dir.mkdir(parents=True, exist_ok=True)
+
+    lines = outline_md.splitlines()
+    chunks: list[tuple[str, list[str]]] = []
+    cur_title = "overview"
+    cur_lines: list[str] = []
+
+    def flush():
+        nonlocal cur_title, cur_lines
+        if cur_lines:
+            chunks.append((cur_title, cur_lines))
+        cur_lines = []
+
+    for line in lines:
+        if line.startswith("## "):
+            flush()
+            cur_title = line[3:].strip() or "section"
+            cur_lines.append(line)
+        else:
+            cur_lines.append(line)
+    flush()
+
+    out_paths: list[Path] = []
+    for i, (title, c_lines) in enumerate(chunks, start=1):
+        slug = (
+            title.lower()
+            .replace("/", " ")
+            .replace("\\", " ")
+            .replace(":", " ")
+            .replace("  ", " ")
+            .strip()
+        )
+        slug = "-".join([p for p in slug.split() if p])[:60] or f"section-{i}"
+        p = nodes_dir / f"{i:02d}-{slug}.md"
+        text = "\n".join(c_lines).strip() + "\n"
+        if len(text) > max_node_chars:
+            text = text[:max_node_chars] + "\n\n[TRUNCATED]\n"
+        p.write_text(text, encoding="utf-8")
+        out_paths.append(p)
+
+    return out_paths
+
+
+def write_doc_index(*, doc_index_path: Path, source_path: Path, tool_summary: Path, execution_notes: Path, outline_path: Path | None, node_paths: list[Path]) -> None:
+    doc_index_path.parent.mkdir(parents=True, exist_ok=True)
+
+    rel = lambda p: p.name if p.parent == doc_index_path.parent else str(p.relative_to(doc_index_path.parent))
+
+    lines: list[str] = []
+    lines.append(f"# {source_path.stem}")
+    lines.append("")
+    lines.append("## Outputs")
+    lines.append(f"- Tool summary: [{tool_summary.name}]({rel(tool_summary)})")
+    lines.append(f"- Execution notes: [{execution_notes.name}]({rel(execution_notes)})")
+    if outline_path:
+        lines.append(f"- Outline: [{outline_path.name}]({rel(outline_path)})")
+    if node_paths:
+        lines.append("")
+        lines.append("## Nodes")
+        for p in node_paths:
+            lines.append(f"- [{p.name}]({rel(p)})")
+    lines.append("")
+    lines.append("## Source")
+    lines.append(f"- `{source_path}`")
+    lines.append("")
+
+    doc_index_path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def write_root_index(*, out_root: Path, input_root: Path, doc_indices: list[Path]) -> None:
+    """Human-browsable top index that links to per-doc indices."""
+    index_path = out_root / "index.md"
+    lines: list[str] = []
+    lines.append("# DocDistill Index")
+    lines.append("")
+    lines.append(f"- Source: `{input_root}`")
+    lines.append(f"- Generated: {time.strftime('%Y-%m-%d %H:%M:%S %Z', time.localtime())}")
+    lines.append("")
+
+    if not doc_indices:
+        lines.append("(No per-doc indices were generated. Run with `--nodes`.)")
+        index_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return
+
+    lines.append("## Documents")
+    for p in sorted(doc_indices):
+        rel = str(p.relative_to(out_root))
+        lines.append(f"- [{p.stem}]({rel})")
+
+    index_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def load_cache(cache_path: Path) -> dict:
+    try:
+        return json.loads(cache_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {"files": {}}
+
+
+def save_cache(cache_path: Path, cache: dict) -> None:
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    cache_path.write_text(json.dumps(cache, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="DocDistill CLI: extract docs -> execution-notes.md + tool-summary.md")
     ap.add_argument("input", help="File or directory to process")
     ap.add_argument("--out", default="./docdistill_out", help="Output directory")
+
     ap.add_argument("--engine", choices=["ollama", "openclaw"], default="ollama", help="Generation engine")
 
     ap.add_argument("--ollama-url", default=DEFAULT_OLLAMA_URL)
@@ -184,18 +379,41 @@ def main() -> int:
 
     ap.add_argument("--exec-max-tokens", type=int, default=1200)
     ap.add_argument("--summary-max-tokens", type=int, default=350)
+    ap.add_argument("--outline", action="store_true", help="Generate a loss-minimized outline first and summarize from it")
+    ap.add_argument("--outline-max-tokens", type=int, default=5000)
+    ap.add_argument("--nodes", action="store_true", help="Write outline shards + per-doc index linking nodes")
+
     ap.add_argument("--max-chars", type=int, default=180_000, help="Max extracted chars per file")
     ap.add_argument("--sleep-ms", type=int, default=0, help="Sleep between files (throttle)")
+
     ap.add_argument("--skip-existing", action="store_true")
+    ap.add_argument("--only", choices=["all", "tool-summary", "execution-notes"], default="all")
+
+    ap.add_argument("--include", action="append", default=[], help="Glob(s) to include (default: all)")
+    ap.add_argument("--exclude", action="append", default=[], help="Glob(s) to exclude")
+    ap.add_argument("--max-files", type=int, default=0, help="Process at most N files (0 = no limit)")
+
+    ap.add_argument("--retries", type=int, default=2)
+    ap.add_argument("--retry-sleep", type=float, default=1.5)
+    ap.add_argument("--max-errors", type=int, default=10)
+    ap.add_argument("--fail-fast", action="store_true")
+    ap.add_argument("--validate", action="store_true", help="Validate outputs; retry once if invalid")
+
     args = ap.parse_args()
 
     input_root = Path(args.input).expanduser().resolve()
     out_root = Path(args.out).expanduser().resolve()
     out_root.mkdir(parents=True, exist_ok=True)
 
+    meta_dir = out_root / ".docdistill"
+    cache_path = meta_dir / "cache.json"
+    errors_log = meta_dir / "errors.log"
+    run_stats_path = meta_dir / "run_stats.json"
+
+    cache = load_cache(cache_path)
+
     gateway_token = args.gateway_token
     if args.engine == "openclaw" and not gateway_token:
-        # Best-effort: read local gateway token from the OpenClaw config.
         try:
             cfg_path = Path("~/.openclaw/openclaw.json").expanduser()
             cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
@@ -204,78 +422,231 @@ def main() -> int:
             gateway_token = ""
 
     if args.engine == "openclaw" and not gateway_token:
-        print(
-            "ERROR: --gateway-token (or OPENCLAW_GATEWAY_TOKEN) is required for engine=openclaw",
-            file=sys.stderr,
-        )
+        print("ERROR: --gateway-token (or OPENCLAW_GATEWAY_TOKEN) is required for engine=openclaw", file=sys.stderr)
         return 2
 
     prompts = build_prompts(
         token_cap_hint=f"~{args.exec_max_tokens} tokens max",
+        outline_max_tokens=args.outline_max_tokens,
         exec_max_tokens=args.exec_max_tokens,
         summary_max_tokens=args.summary_max_tokens,
     )
 
-    files = list(iter_input_files(input_root))
-    if not files:
+    all_files = list(iter_input_files(input_root))
+    if not all_files:
         print("No matching files found.", file=sys.stderr)
         return 2
 
-    for p in files:
+    # include/exclude filtering is based on path relative to input root
+    files: list[Path] = []
+    for p in all_files:
+        rel = p.name if input_root.is_file() else str(p.relative_to(input_root))
+        if args.include and not matches_any(rel, args.include):
+            continue
+        if args.exclude and matches_any(rel, args.exclude):
+            continue
+        files.append(p)
+
+    total = len(files)
+    if args.max_files and args.max_files > 0:
+        files = files[: args.max_files]
+
+    start = time.time()
+    stats = {
+        "engine": args.engine,
+        "ollama_model": args.ollama_model,
+        "outline": bool(args.outline),
+        "nodes": bool(args.nodes),
+        "input": str(input_root),
+        "out": str(out_root),
+        "total_candidates": total,
+        "processed": 0,
+        "ok": 0,
+        "skipped": 0,
+        "errors": 0,
+        "startedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+
+    def log_error(msg: str) -> None:
+        errors_log.parent.mkdir(parents=True, exist_ok=True)
+        with errors_log.open("a", encoding="utf-8", errors="ignore") as f:
+            f.write(msg + "\n")
+
+    doc_indices: list[Path] = []
+
+    for idx, p in enumerate(files, start=1):
+        stats["processed"] += 1
+        rel = p.name if input_root.is_file() else str(p.relative_to(input_root))
+
         try:
             extracted = extract_file(p)
             text = extracted.text
             if len(text) > args.max_chars:
                 text = text[: args.max_chars] + "\n\n[TRUNCATED]"
 
+            text_hash = sha256_text(text)
+
             exec_out = rel_output_path(p, input_root, out_root, ".execution-notes.md")
             sum_out = rel_output_path(p, input_root, out_root, ".tool-summary.md")
+            outline_out = rel_output_path(p, input_root, out_root, ".outline.md")
+            nodes_dir = rel_output_path(p, input_root, out_root, "")
+            nodes_dir = nodes_dir.parent / nodes_dir.name  # directory for this doc
+            nodes_dir = nodes_dir / "nodes"
+            doc_index = rel_output_path(p, input_root, out_root, "")
+            doc_index = doc_index.parent / (doc_index.name + ".index.md")
+
             exec_out.parent.mkdir(parents=True, exist_ok=True)
 
+            cached = cache.get("files", {}).get(rel)
             if args.skip_existing and exec_out.exists() and sum_out.exists():
+                stats["skipped"] += 1
+                continue
+            if cached and cached.get("hash") == text_hash and exec_out.exists() and sum_out.exists() and args.skip_existing:
+                stats["skipped"] += 1
                 continue
 
-            if args.engine == "ollama":
-                exec_md = ollama_generate(
+            print(f"[{idx}/{len(files)}] {rel}", flush=True)
+
+            source_for_stage_b = text
+
+            node_paths: list[Path] = []
+            if args.outline or args.nodes:
+                outline_md = generate_with_retries(
+                    engine=args.engine,
+                    retries=args.retries,
+                    sleep_s=args.retry_sleep,
+                    prompt=prompts.outline + text,
+                    max_tokens=args.outline_max_tokens,
                     ollama_url=args.ollama_url,
-                    model=args.ollama_model,
-                    prompt=prompts.execution_notes + text,
-                    num_predict=args.exec_max_tokens,
-                )
-                sum_md = ollama_generate(
-                    ollama_url=args.ollama_url,
-                    model=args.ollama_model,
-                    prompt=prompts.tool_summary + text,
-                    num_predict=args.summary_max_tokens,
-                )
-            else:
-                exec_md = openclaw_generate(
+                    ollama_model=args.ollama_model,
                     gateway_url=args.gateway_url,
                     gateway_token=gateway_token,
                     agent_id=args.gateway_agent_id,
-                    prompt=prompts.execution_notes + text,
-                    max_output_tokens=args.exec_max_tokens,
                 )
-                sum_md = openclaw_generate(
+                outline_out.write_text(outline_md + "\n", encoding="utf-8")
+                source_for_stage_b = outline_md
+
+                if args.nodes:
+                    node_paths = shard_outline_to_nodes(outline_md=outline_md, nodes_dir=nodes_dir)
+
+            exec_md = ""
+            sum_md = ""
+
+            if args.only in ("all", "execution-notes"):
+                exec_md = generate_with_retries(
+                    engine=args.engine,
+                    retries=args.retries,
+                    sleep_s=args.retry_sleep,
+                    prompt=prompts.execution_notes + source_for_stage_b,
+                    max_tokens=args.exec_max_tokens,
+                    ollama_url=args.ollama_url,
+                    ollama_model=args.ollama_model,
                     gateway_url=args.gateway_url,
                     gateway_token=gateway_token,
                     agent_id=args.gateway_agent_id,
-                    prompt=prompts.tool_summary + text,
-                    max_output_tokens=args.summary_max_tokens,
                 )
 
-            exec_out.write_text(exec_md + "\n", encoding="utf-8")
-            sum_out.write_text(sum_md + "\n", encoding="utf-8")
+            if args.only in ("all", "tool-summary"):
+                sum_md = generate_with_retries(
+                    engine=args.engine,
+                    retries=args.retries,
+                    sleep_s=args.retry_sleep,
+                    prompt=prompts.tool_summary + source_for_stage_b,
+                    max_tokens=args.summary_max_tokens,
+                    ollama_url=args.ollama_url,
+                    ollama_model=args.ollama_model,
+                    gateway_url=args.gateway_url,
+                    gateway_token=gateway_token,
+                    agent_id=args.gateway_agent_id,
+                )
 
-            print(f"OK {p} -> {exec_out.relative_to(out_root)} , {sum_out.relative_to(out_root)}")
+            # Validation + one extra retry if requested
+            if args.validate:
+                if sum_md:
+                    probs = validate_tool_summary(sum_md)
+                    if probs:
+                        sum_md = generate_with_retries(
+                            engine=args.engine,
+                            retries=0,
+                            sleep_s=args.retry_sleep,
+                            prompt=prompts.tool_summary + source_for_stage_b,
+                            max_tokens=args.summary_max_tokens,
+                            ollama_url=args.ollama_url,
+                            ollama_model=args.ollama_model,
+                            gateway_url=args.gateway_url,
+                            gateway_token=gateway_token,
+                            agent_id=args.gateway_agent_id,
+                        )
+                if exec_md:
+                    probs = validate_execution_notes(exec_md)
+                    if probs:
+                        exec_md = generate_with_retries(
+                            engine=args.engine,
+                            retries=0,
+                            sleep_s=args.retry_sleep,
+                            prompt=prompts.execution_notes + source_for_stage_b,
+                            max_tokens=args.exec_max_tokens,
+                            ollama_url=args.ollama_url,
+                            ollama_model=args.ollama_model,
+                            gateway_url=args.gateway_url,
+                            gateway_token=gateway_token,
+                            agent_id=args.gateway_agent_id,
+                        )
+
+            if exec_md:
+                exec_out.write_text(exec_md.strip() + "\n", encoding="utf-8")
+            if sum_md:
+                sum_out.write_text(sum_md.strip() + "\n", encoding="utf-8")
+
+            if args.nodes:
+                write_doc_index(
+                    doc_index_path=doc_index,
+                    source_path=p,
+                    tool_summary=sum_out,
+                    execution_notes=exec_out,
+                    outline_path=outline_out if outline_out.exists() else None,
+                    node_paths=node_paths,
+                )
+                doc_indices.append(doc_index)
+
+            cache.setdefault("files", {})[rel] = {
+                "hash": text_hash,
+                "engine": args.engine,
+                "ollama_model": args.ollama_model,
+                "outline": bool(args.outline),
+                "nodes": bool(args.nodes),
+                "ts": time.time(),
+            }
+            save_cache(cache_path, cache)
+
+            stats["ok"] += 1
 
             if args.sleep_ms:
                 time.sleep(args.sleep_ms / 1000.0)
 
         except Exception as e:
-            print(f"ERROR {p}: {e}", file=sys.stderr)
+            stats["errors"] += 1
+            msg = f"ERROR {rel}: {e!r}"
+            print(msg, file=sys.stderr, flush=True)
+            try:
+                log_error(msg)
+            except Exception:
+                pass
+            if args.fail_fast or stats["errors"] >= args.max_errors:
+                break
 
-    return 0
+    # Root index is generated when --nodes is enabled.
+    if args.nodes:
+        try:
+            write_root_index(out_root=out_root, input_root=input_root, doc_indices=doc_indices)
+        except Exception as e:
+            log_error(f"ERROR write_root_index: {e!r}")
+
+    stats["durationSeconds"] = round(time.time() - start, 2)
+    run_stats_path.parent.mkdir(parents=True, exist_ok=True)
+    run_stats_path.write_text(json.dumps(stats, indent=2) + "\n", encoding="utf-8")
+
+    return 0 if stats["errors"] == 0 else 1
 
 
 if __name__ == "__main__":
