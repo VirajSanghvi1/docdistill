@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# venv
+.venv/
+venv/
+
+# Outputs
+*_out/
+docpipe_out/
+_data/
+run/
+
+# OS
+.DS_Store
