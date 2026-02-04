@@ -328,6 +328,29 @@ def write_doc_index(*, doc_index_path: Path, source_path: Path, tool_summary: Pa
     doc_index_path.write_text("\n".join(lines), encoding="utf-8")
 
 
+def write_root_index(*, out_root: Path, input_root: Path, doc_indices: list[Path]) -> None:
+    """Human-browsable top index that links to per-doc indices."""
+    index_path = out_root / "index.md"
+    lines: list[str] = []
+    lines.append("# DocDistill Index")
+    lines.append("")
+    lines.append(f"- Source: `{input_root}`")
+    lines.append(f"- Generated: {time.strftime('%Y-%m-%d %H:%M:%S %Z', time.localtime())}")
+    lines.append("")
+
+    if not doc_indices:
+        lines.append("(No per-doc indices were generated. Run with `--nodes`.)")
+        index_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return
+
+    lines.append("## Documents")
+    for p in sorted(doc_indices):
+        rel = str(p.relative_to(out_root))
+        lines.append(f"- [{p.stem}]({rel})")
+
+    index_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def load_cache(cache_path: Path) -> dict:
     try:
         return json.loads(cache_path.read_text(encoding="utf-8"))
@@ -448,6 +471,8 @@ def main() -> int:
         errors_log.parent.mkdir(parents=True, exist_ok=True)
         with errors_log.open("a", encoding="utf-8", errors="ignore") as f:
             f.write(msg + "\n")
+
+    doc_indices: list[Path] = []
 
     for idx, p in enumerate(files, start=1):
         stats["processed"] += 1
@@ -582,6 +607,7 @@ def main() -> int:
                     outline_path=outline_out if outline_out.exists() else None,
                     node_paths=node_paths,
                 )
+                doc_indices.append(doc_index)
 
             cache.setdefault("files", {})[rel] = {
                 "hash": text_hash,
@@ -608,6 +634,13 @@ def main() -> int:
                 pass
             if args.fail_fast or stats["errors"] >= args.max_errors:
                 break
+
+    # Root index is generated when --nodes is enabled.
+    if args.nodes:
+        try:
+            write_root_index(out_root=out_root, input_root=input_root, doc_indices=doc_indices)
+        except Exception as e:
+            log_error(f"ERROR write_root_index: {e!r}")
 
     stats["durationSeconds"] = round(time.time() - start, 2)
     run_stats_path.parent.mkdir(parents=True, exist_ok=True)
