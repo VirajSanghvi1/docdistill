@@ -53,9 +53,27 @@ def ollama_embed(*, ollama_url: str, model: str, text: str, max_chars: int = 180
     return emb
 
 
-def iter_md_files(root: Path) -> Iterable[Path]:
+def iter_md_files(root: Path, *, include_outlines: bool = False) -> Iterable[Path]:
+    """Yield markdown files that are good retrieval units.
+
+    Default behavior: index nodes + tool summaries + execution notes + indices + root index.
+    Skip outlines by default (large + noisy).
+    """
     for p in root.rglob("*.md"):
-        if p.is_file() and ".docdistill" not in p.parts:
+        if not p.is_file() or ".docdistill" in p.parts:
+            continue
+
+        name = p.name
+        if name.endswith(".outline.md") and not include_outlines:
+            continue
+
+        # Prefer: nodes, summaries, notes, indices
+        if "/nodes/" in p.as_posix() or name.endswith((
+            ".tool-summary.md",
+            ".execution-notes.md",
+            ".index.md",
+            "index.md",
+        )):
             yield p
 
 
@@ -141,12 +159,13 @@ def index_distilled_dir(
     ollama_url: str,
     embed_model: str,
     sleep_ms: int = 0,
+    include_outlines: bool = False,
 ) -> dict:
     loc = ChromaLoc(base_url=chroma_url)
     c = get_or_create_collection(loc, collection, space="cosine")
     cid = str(c["id"])
 
-    files = list(iter_md_files(distilled_root))
+    files = list(iter_md_files(distilled_root, include_outlines=include_outlines))
 
     added = 0
     for p in files:

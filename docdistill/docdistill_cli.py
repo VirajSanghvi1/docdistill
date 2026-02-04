@@ -425,6 +425,7 @@ def main() -> int:
     ap_i.add_argument("--ollama-url", default="http://127.0.0.1:11434")
     ap_i.add_argument("--embed-model", default="nomic-embed-text")
     ap_i.add_argument("--sleep-ms", type=int, default=0)
+    ap_i.add_argument("--include-outlines", action="store_true", help="Also index *.outline.md (default: skip)")
 
     # --- Query ---
     ap_q = sub.add_parser("query", help="Hybrid search (vector + keyword) over an indexed distilled directory")
@@ -450,6 +451,7 @@ def main() -> int:
             ollama_url=args.ollama_url,
             embed_model=args.embed_model,
             sleep_ms=args.sleep_ms,
+            include_outlines=bool(args.include_outlines),
         )
         print(json.dumps(res, indent=2))
         return 0
