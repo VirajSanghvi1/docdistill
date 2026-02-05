@@ -454,7 +454,10 @@ def main() -> int:
 
     # --- Index command ---
     if args.cmd == "index":
-        from vector_index import index_distilled_dir
+        try:
+            from .vector_index import index_distilled_dir
+        except ImportError:  # pragma: no cover
+            from vector_index import index_distilled_dir
 
         def _parse_csv_set(s: str) -> set[str] | None:
             parts = [p.strip() for p in (s or "").split(",") if p.strip()]
@@ -477,7 +480,10 @@ def main() -> int:
 
     # --- Query command ---
     if args.cmd == "query":
-        from vector_index import query_distilled
+        try:
+            from .vector_index import query_distilled
+        except ImportError:  # pragma: no cover
+            from vector_index import query_distilled
 
         res = query_distilled(
             query=args.query,
@@ -574,7 +580,10 @@ def main() -> int:
         rel = p.name if input_root.is_file() else str(p.relative_to(input_root))
 
         try:
-            from extract import extract_file
+            try:
+                from .extract import extract_file
+            except ImportError:  # pragma: no cover
+                from extract import extract_file
 
             extracted = extract_file(p)
             text = extracted.text

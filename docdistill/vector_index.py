@@ -9,7 +9,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-from chroma_rest import ChromaLoc, add as chroma_add, get_or_create_collection, query as chroma_query
+try:
+    # Package context
+    from .chroma_rest import ChromaLoc, add as chroma_add, get_or_create_collection, query as chroma_query
+except ImportError:  # pragma: no cover
+    # Script context (python docdistill/vector_index.py)
+    from chroma_rest import ChromaLoc, add as chroma_add, get_or_create_collection, query as chroma_query
 
 
 DEFAULT_CHROMA_URL = "http://127.0.0.1:8100"
@@ -168,7 +173,7 @@ def file_to_chunks(*, file_path: Path, collection: str) -> list[Chunk]:
 def keyword_search(*, root: Path, query: str, top_k: int = 10) -> list[dict]:
     try:
         proc = subprocess.run(
-            ["rg", "-n", "--no-heading", "--smart-case", "--max-count", str(top_k), query, str(root)],
+            ["rg", "-n", "--no-heading", "--smart-case", query, str(root)],
             capture_output=True,
             text=True,
             check=False,
@@ -179,6 +184,8 @@ def keyword_search(*, root: Path, query: str, top_k: int = 10) -> list[dict]:
             parts = line.split(":", 2)
             if len(parts) == 3:
                 hits.append({"path": parts[0], "line": int(parts[1]), "text": parts[2]})
+            if len(hits) >= top_k:
+                break
         return hits
     except FileNotFoundError:
         return []
