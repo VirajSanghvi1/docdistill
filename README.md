@@ -4,7 +4,7 @@
   <img src="assets/hero.svg" alt="DocDistill: Compress first. Index second." width="900" />
 </p>
 
-DocDistill is a local-first CLI that turns a folder of docs (PDF/HTML/TXT/MD) into **low-fluff, LLM-ready Markdown** — and can then **index + query** the distilled output.
+DocDistill is a local-first CLI that turns a folder of docs (PDF/HTML/TXT/MD) into **structured, low-fluff Markdown** — and then makes it searchable with **Chroma** 🧠 + **ripgrep** 🔎.
 
 Core idea: **compression-before-embeddings** ✂️➡️🧠
 
@@ -40,7 +40,7 @@ DocDistill supports two backends:
 
 - **Python 3.11+**
 - An LLM engine:
-  - **OpenClaw** (recommended) 🪐, or
+  - **OpenClaw** (recommended) 🦞, or
   - **Ollama** 🦙
 - For search:
   - **Chroma** (open-source, local) 🧠 at `http://127.0.0.1:8100`
@@ -57,14 +57,22 @@ pip install -r docdistill/requirements.txt
 ## Quickstart (60s)
 
 ```bash
-# 1) Distill
-python -m docdistill.docdistill_cli condense /path/to/docs --out ./docdistill_out --engine ollama --ollama-model llama3.2:3b
+# 0) Setup
+cd ~/Projects/docdistill
+source .venv/bin/activate
 
-# 2) Index (requires Chroma running)
-python -m docdistill.docdistill_cli index ./docdistill_out --collection my-docs --chroma-url http://127.0.0.1:8100
+# 1) Condense → Index (one command)
+python -m docdistill.docdistill_cli run /path/to/docs \
+  --out ./docdistill_out \
+  --engine ollama --ollama-model llama3.2:3b \
+  --collection my-docs \
+  --chroma-url http://127.0.0.1:8100 \
+  --skip-indexed
 
-# 3) Query
-python -m docdistill.docdistill_cli query ./docdistill_out --collection my-docs "rollback procedure"
+# 2) Query
+python -m docdistill.docdistill_cli query ./docdistill_out \
+  --collection my-docs \
+  "rollback procedure"
 ```
 
 ## Usage
@@ -100,6 +108,9 @@ python -m docdistill.docdistill_cli query ./docdistill_out \
 ### Useful flags
 
 - `--skip-existing` : don’t redo files that already have both outputs
+- `--skip-indexed` : don’t re-embed chunks that are already indexed
+- `--nodes` : write per-section nodes + per-doc/root indices
+- `--node-max-chars 1200` : keep nodes embed-friendly
 - `--sleep-ms 200` : throttle between files (helps avoid timeouts)
 - `--max-chars 180000` : cap extracted text per file before summarizing
 
@@ -119,12 +130,22 @@ DocDistill preserves folder structure under your `--out` dir:
 - If you use `--engine openclaw`, pass `--gateway-token` or set `OPENCLAW_GATEWAY_TOKEN`.
 - Indexing defaults to high-signal artifacts (nodes/summaries/notes) and skips `*.outline.md` unless you opt in.
 
-## Roadmap (planned)
+## Roadmap
 
-- **Stage-1 outline** (loss-minimized, high budget)
-- **Atomic topic nodes** (200–600 token shards)
-- **`index.md` graph** (tiny navigational maps)
-- One-command pipeline (condense → index)
+### Current (implemented)
+- `condense` — condense/summarize documents into Markdown artifacts
+- `index` — chunk + embed + store in **Chroma** collections
+- `query` — retrieve relevant chunks (vector + keyword)
+- `run` — one-command pipeline (condense → index)
+- Outline + nodes + indices: `--outline`, `--nodes`, root `index.md` + per-doc `*.index.md`
+
+### Next (near-term)
+- Detect deletions (prune removed chunks from Chroma)
+- Batch upserts to Chroma for speed
+- Better query output formatting (snippets + anchors)
+- `docdistill doctor` (dependency checks)
+
+(Full: [ROADMAP.md](ROADMAP.md))
 
 ---
 
