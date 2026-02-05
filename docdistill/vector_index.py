@@ -49,16 +49,21 @@ def post_json(url: str, data: dict, timeout: int = 120) -> dict:
         raise RuntimeError(f"HTTP {e.code} calling {url}: {detail[:500]}")
 
 
+def _embed_input(text: str, *, max_chars: int) -> str:
+    if len(text) > max_chars:
+        return text[:max_chars] + "\n[TRUNCATED_FOR_EMBEDDING]"
+    return text
+
+
 def ollama_embed(*, ollama_url: str, model: str, text: str, max_chars: int = 800) -> list[float]:
     """Embed text with Ollama.
 
     Embedding models have a context limit; we defensively truncate.
     """
-    if len(text) > max_chars:
-        text = text[:max_chars] + "\n[TRUNCATED_FOR_EMBEDDING]"
+    prompt = _embed_input(text, max_chars=max_chars)
     data = post_json(
         f"{ollama_url}/api/embeddings",
-        {"model": model, "prompt": text},
+        {"model": model, "prompt": prompt},
         timeout=600,
     )
     emb = data.get("embedding")
@@ -237,8 +242,16 @@ def index_distilled_dir(
         chunks = file_to_chunks(file_path=p, collection=collection)
         for ch in chunks:
             key = ch.id
-            h = _sha256_text(ch.text)
-            if skip_indexed and isinstance(cache.get(key), dict) and cache[key].get("sha256") == h:
+            prompt = _embed_input(ch.text, max_chars=embed_max_chars)
+            h = _sha256_text(prompt)
+            cached = cache.get(key) if isinstance(cache, dict) else None
+            if (
+                skip_indexed
+                and isinstance(cached, dict)
+                and cached.get("sha256") == h
+                and cached.get("embed_model") == embed_model
+                and int(cached.get("embed_max_chars") or embed_max_chars) == embed_max_chars
+            ):
                 skipped += 1
                 continue
 
@@ -250,6 +263,7 @@ def index_distilled_dir(
                 cache[key] = {
                     "sha256": h,
                     "embed_model": embed_model,
+                    "embed_max_chars": embed_max_chars,
                     "updatedAt": int(time.time()),
                 }
 
