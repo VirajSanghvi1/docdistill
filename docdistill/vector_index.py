@@ -53,28 +53,57 @@ def ollama_embed(*, ollama_url: str, model: str, text: str, max_chars: int = 180
     return emb
 
 
-def iter_md_files(root: Path, *, include_outlines: bool = False) -> Iterable[Path]:
+def iter_md_files(
+    root: Path,
+    *,
+    include_outlines: bool = False,
+    include_kinds: set[str] | None = None,
+    exclude_kinds: set[str] | None = None,
+) -> Iterable[Path]:
     """Yield markdown files that are good retrieval units.
 
     Default behavior: index nodes + tool summaries + execution notes + indices + root index.
     Skip outlines by default (large + noisy).
+
+    You can further filter by kind using include_kinds/exclude_kinds.
+    Kinds: node, tool-summary, execution-notes, index, root-index, outline, md
     """
+
+    def kind_for(p: Path) -> str:
+        if "/nodes/" in p.as_posix():
+            return "node"
+        n = p.name
+        if n.endswith(".tool-summary.md"):
+            return "tool-summary"
+        if n.endswith(".execution-notes.md"):
+            return "execution-notes"
+        if n.endswith(".outline.md"):
+            return "outline"
+        if n.endswith(".index.md"):
+            return "index"
+        if n == "index.md":
+            return "root-index"
+        return "md"
+
     for p in root.rglob("*.md"):
         if not p.is_file() or ".docdistill" in p.parts:
             continue
 
-        name = p.name
-        if name.endswith(".outline.md") and not include_outlines:
+        k = kind_for(p)
+        if k == "outline" and not include_outlines:
             continue
 
-        # Prefer: nodes, summaries, notes, indices
-        if "/nodes/" in p.as_posix() or name.endswith((
-            ".tool-summary.md",
-            ".execution-notes.md",
-            ".index.md",
-            "index.md",
-        )):
-            yield p
+        # Default allowlist
+        default_ok = k in {"node", "tool-summary", "execution-notes", "index", "root-index"}
+        if not default_ok:
+            continue
+
+        if include_kinds is not None and k not in include_kinds:
+            continue
+        if exclude_kinds is not None and k in exclude_kinds:
+            continue
+
+        yield p
 
 
 def kind_from_name(name: str) -> str:
@@ -160,12 +189,21 @@ def index_distilled_dir(
     embed_model: str,
     sleep_ms: int = 0,
     include_outlines: bool = False,
+    include_kinds: set[str] | None = None,
+    exclude_kinds: set[str] | None = None,
 ) -> dict:
     loc = ChromaLoc(base_url=chroma_url)
     c = get_or_create_collection(loc, collection, space="cosine")
     cid = str(c["id"])
 
-    files = list(iter_md_files(distilled_root, include_outlines=include_outlines))
+    files = list(
+        iter_md_files(
+            distilled_root,
+            include_outlines=include_outlines,
+            include_kinds=include_kinds,
+            exclude_kinds=exclude_kinds,
+        )
+    )
 
     added = 0
     for p in files:

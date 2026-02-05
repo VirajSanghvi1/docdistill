@@ -426,6 +426,16 @@ def main() -> int:
     ap_i.add_argument("--embed-model", default="nomic-embed-text")
     ap_i.add_argument("--sleep-ms", type=int, default=0)
     ap_i.add_argument("--include-outlines", action="store_true", help="Also index *.outline.md (default: skip)")
+    ap_i.add_argument(
+        "--include-kinds",
+        default="",
+        help="Comma-separated kinds to include (filters default set). Kinds: node,tool-summary,execution-notes,index,root-index,outline,md",
+    )
+    ap_i.add_argument(
+        "--exclude-kinds",
+        default="",
+        help="Comma-separated kinds to exclude. Kinds: node,tool-summary,execution-notes,index,root-index,outline,md",
+    )
 
     # --- Query ---
     ap_q = sub.add_parser("query", help="Hybrid search (vector + keyword) over an indexed distilled directory")
@@ -444,6 +454,10 @@ def main() -> int:
     if args.cmd == "index":
         from vector_index import index_distilled_dir
 
+        def _parse_csv_set(s: str) -> set[str] | None:
+            parts = [p.strip() for p in (s or "").split(",") if p.strip()]
+            return set(parts) if parts else None
+
         res = index_distilled_dir(
             distilled_root=Path(args.distilled).expanduser().resolve(),
             chroma_url=args.chroma_url,
@@ -452,6 +466,8 @@ def main() -> int:
             embed_model=args.embed_model,
             sleep_ms=args.sleep_ms,
             include_outlines=bool(args.include_outlines),
+            include_kinds=_parse_csv_set(args.include_kinds),
+            exclude_kinds=_parse_csv_set(args.exclude_kinds),
         )
         print(json.dumps(res, indent=2))
         return 0
