@@ -418,7 +418,7 @@ def main() -> int:
     ap_c.add_argument("--validate", action="store_true", help="Validate outputs; retry once if invalid")
 
     # --- Index ---
-    ap_i = sub.add_parser("index", help="Embed + store a distilled directory into Chroma (new collection)")
+    ap_i = sub.add_parser("index", help="Embed + store a distilled directory into Chroma")
     ap_i.add_argument("distilled", help="Distilled output directory (from condense)")
     ap_i.add_argument("--collection", required=True, help="Chroma collection name")
     ap_i.add_argument("--chroma-url", default="http://127.0.0.1:8100")
@@ -437,6 +437,45 @@ def main() -> int:
         default="",
         help="Comma-separated kinds to exclude. Kinds: node,tool-summary,execution-notes,index,root-index,outline,md",
     )
+    ap_i.add_argument("--skip-indexed", action="store_true", help="Skip chunks already indexed (via .docdistill/index_cache.json)")
+
+    # --- Run (condense + index) ---
+    ap_r = sub.add_parser("run", help="One-command pipeline: condense then index into a single Chroma collection")
+    ap_r.add_argument("input", help="File or directory to process")
+    ap_r.add_argument("--out", default="./docdistill_out", help="Output directory")
+    ap_r.add_argument("--collection", required=True, help="Chroma collection name")
+    ap_r.add_argument("--chroma-url", default="http://127.0.0.1:8100")
+    ap_r.add_argument("--ollama-url", default=DEFAULT_OLLAMA_URL)
+    ap_r.add_argument("--embed-model", default="nomic-embed-text")
+    ap_r.add_argument("--embed-max-chars", type=int, default=800)
+    ap_r.add_argument("--skip-indexed", action="store_true")
+    ap_r.add_argument("--include-outlines", action="store_true")
+    ap_r.add_argument("--include-kinds", default="")
+    ap_r.add_argument("--exclude-kinds", default="")
+
+    # Condense options (same as condense)
+    ap_r.add_argument("--engine", choices=["ollama", "openclaw"], default="ollama")
+    ap_r.add_argument("--ollama-model", default=DEFAULT_OLLAMA_MODEL)
+    ap_r.add_argument("--gateway-url", default=DEFAULT_GATEWAY_URL)
+    ap_r.add_argument("--gateway-token", default=os.environ.get("OPENCLAW_GATEWAY_TOKEN", ""))
+    ap_r.add_argument("--gateway-agent-id", default="main")
+    ap_r.add_argument("--exec-max-tokens", type=int, default=1200)
+    ap_r.add_argument("--summary-max-tokens", type=int, default=350)
+    ap_r.add_argument("--outline", action="store_true")
+    ap_r.add_argument("--outline-max-tokens", type=int, default=5000)
+    ap_r.add_argument("--nodes", action="store_true")
+    ap_r.add_argument("--max-chars", type=int, default=180_000)
+    ap_r.add_argument("--sleep-ms", type=int, default=0)
+    ap_r.add_argument("--skip-existing", action="store_true")
+    ap_r.add_argument("--only", choices=["all", "tool-summary", "execution-notes"], default="all")
+    ap_r.add_argument("--include", action="append", default=[])
+    ap_r.add_argument("--exclude", action="append", default=[])
+    ap_r.add_argument("--max-files", type=int, default=0)
+    ap_r.add_argument("--retries", type=int, default=2)
+    ap_r.add_argument("--retry-sleep", type=float, default=1.5)
+    ap_r.add_argument("--max-errors", type=int, default=10)
+    ap_r.add_argument("--fail-fast", action="store_true")
+    ap_r.add_argument("--validate", action="store_true")
 
     # --- Query ---
     ap_q = sub.add_parser("query", help="Hybrid search (vector + keyword) over an indexed distilled directory")
@@ -463,8 +502,11 @@ def main() -> int:
             parts = [p.strip() for p in (s or "").split(",") if p.strip()]
             return set(parts) if parts else None
 
+        distilled_root = Path(args.distilled).expanduser().resolve()
+        index_cache_path = distilled_root / ".docdistill" / "index_cache.json"
+
         res = index_distilled_dir(
-            distilled_root=Path(args.distilled).expanduser().resolve(),
+            distilled_root=distilled_root,
             chroma_url=args.chroma_url,
             collection=args.collection,
             ollama_url=args.ollama_url,
@@ -474,6 +516,8 @@ def main() -> int:
             include_outlines=bool(args.include_outlines),
             include_kinds=_parse_csv_set(args.include_kinds),
             exclude_kinds=_parse_csv_set(args.exclude_kinds),
+            index_cache_path=index_cache_path,
+            skip_indexed=bool(args.skip_indexed),
         )
         print(json.dumps(res, indent=2))
         return 0
@@ -499,7 +543,19 @@ def main() -> int:
         print(json.dumps(res, indent=2))
         return 0
 
-    # --- Condense command ---
+    # --- Condense / Run command ---
+    if args.cmd == "run":
+        # 1) condense into --out
+        run_condense_args = args
+        # reuse the same condense path by setting fields as expected below
+        args = run_condense_args
+        args.cmd = "condense"  # type: ignore[attr-defined]
+
+        # After condense finishes, we index the output.
+        should_index_after = True
+    else:
+        should_index_after = False
+
     assert args.cmd == "condense"
 
     input_root = Path(args.input).expanduser().resolve()
@@ -768,6 +824,40 @@ def main() -> int:
     stats["durationSeconds"] = round(time.time() - start, 2)
     run_stats_path.parent.mkdir(parents=True, exist_ok=True)
     run_stats_path.write_text(json.dumps(stats, indent=2) + "\n", encoding="utf-8")
+
+    # If this was `run`, perform indexing as step 2.
+    if should_index_after:
+        try:
+            try:
+                from .vector_index import index_distilled_dir
+            except ImportError:  # pragma: no cover
+                from vector_index import index_distilled_dir
+
+            def _parse_csv_set(s: str) -> set[str] | None:
+                parts = [p.strip() for p in (s or "").split(",") if p.strip()]
+                return set(parts) if parts else None
+
+            index_cache_path = out_root / ".docdistill" / "index_cache.json"
+
+            index_res = index_distilled_dir(
+                distilled_root=out_root,
+                chroma_url=run_condense_args.chroma_url,
+                collection=run_condense_args.collection,
+                ollama_url=run_condense_args.ollama_url,
+                embed_model=run_condense_args.embed_model,
+                embed_max_chars=run_condense_args.embed_max_chars,
+                include_outlines=bool(run_condense_args.include_outlines),
+                include_kinds=_parse_csv_set(run_condense_args.include_kinds),
+                exclude_kinds=_parse_csv_set(run_condense_args.exclude_kinds),
+                index_cache_path=index_cache_path,
+                skip_indexed=bool(run_condense_args.skip_indexed),
+            )
+            # attach indexing stats to run_stats.json for visibility
+            stats["index"] = index_res
+            run_stats_path.write_text(json.dumps(stats, indent=2) + "\n", encoding="utf-8")
+        except Exception as e:
+            print(f"ERROR: indexing failed: {e!r}", file=sys.stderr)
+            return 1
 
     return 0 if stats["errors"] == 0 else 1
 

@@ -5,6 +5,7 @@ import urllib.error
 import subprocess
 import time
 import urllib.request
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -27,6 +28,10 @@ class Chunk:
     id: str
     text: str
     meta: dict
+
+
+def _sha256_text(s: str) -> str:
+    return hashlib.sha256(s.encode("utf-8", errors="ignore")).hexdigest()
 
 
 def post_json(url: str, data: dict, timeout: int = 120) -> dict:
@@ -203,6 +208,8 @@ def index_distilled_dir(
     include_outlines: bool = False,
     include_kinds: set[str] | None = None,
     exclude_kinds: set[str] | None = None,
+    index_cache_path: Path | None = None,
+    skip_indexed: bool = True,
 ) -> dict:
     loc = ChromaLoc(base_url=chroma_url)
     c = get_or_create_collection(loc, collection, space="cosine")
@@ -217,17 +224,43 @@ def index_distilled_dir(
         )
     )
 
+    cache: dict = {}
+    if index_cache_path is not None and index_cache_path.exists():
+        try:
+            cache = json.loads(index_cache_path.read_text(encoding="utf-8"))
+        except Exception:
+            cache = {}
+
     added = 0
+    skipped = 0
     for p in files:
         chunks = file_to_chunks(file_path=p, collection=collection)
         for ch in chunks:
+            key = ch.id
+            h = _sha256_text(ch.text)
+            if skip_indexed and isinstance(cache.get(key), dict) and cache[key].get("sha256") == h:
+                skipped += 1
+                continue
+
             emb = ollama_embed(ollama_url=ollama_url, model=embed_model, text=ch.text, max_chars=embed_max_chars)
             chroma_add(loc, cid, ids=[ch.id], documents=[ch.text], embeddings=[emb], metadatas=[ch.meta])
             added += 1
+
+            if index_cache_path is not None:
+                cache[key] = {
+                    "sha256": h,
+                    "embed_model": embed_model,
+                    "updatedAt": int(time.time()),
+                }
+
             if sleep_ms:
                 time.sleep(sleep_ms / 1000.0)
 
-    return {"files": len(files), "chunksAdded": added, "collection": collection}
+    if index_cache_path is not None:
+        index_cache_path.parent.mkdir(parents=True, exist_ok=True)
+        index_cache_path.write_text(json.dumps(cache, indent=2, sort_keys=True), encoding="utf-8")
+
+    return {"files": len(files), "chunksAdded": added, "chunksSkipped": skipped, "collection": collection}
 
 
 def query_distilled(
