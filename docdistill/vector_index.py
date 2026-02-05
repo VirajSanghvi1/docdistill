@@ -214,7 +214,7 @@ def index_distilled_dir(
     include_kinds: set[str] | None = None,
     exclude_kinds: set[str] | None = None,
     index_cache_path: Path | None = None,
-    skip_indexed: bool = True,
+    skip_indexed: bool = False,
 ) -> dict:
     loc = ChromaLoc(base_url=chroma_url)
     c = get_or_create_collection(loc, collection, space="cosine")
@@ -234,6 +234,12 @@ def index_distilled_dir(
         try:
             cache = json.loads(index_cache_path.read_text(encoding="utf-8"))
         except Exception:
+            cache = {}
+
+    # Invalidate cache if it was generated for a different target.
+    cache_meta = cache.get("__meta__") if isinstance(cache, dict) else None
+    if isinstance(cache_meta, dict):
+        if cache_meta.get("collection") != collection or cache_meta.get("chroma_url") != chroma_url:
             cache = {}
 
     added = 0
@@ -271,8 +277,15 @@ def index_distilled_dir(
                 time.sleep(sleep_ms / 1000.0)
 
     if index_cache_path is not None:
+        cache["__meta__"] = {
+            "collection": collection,
+            "chroma_url": chroma_url,
+            "updatedAt": int(time.time()),
+        }
         index_cache_path.parent.mkdir(parents=True, exist_ok=True)
-        index_cache_path.write_text(json.dumps(cache, indent=2, sort_keys=True), encoding="utf-8")
+        tmp = index_cache_path.with_suffix(index_cache_path.suffix + ".tmp")
+        tmp.write_text(json.dumps(cache, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        tmp.replace(index_cache_path)
 
     return {"files": len(files), "chunksAdded": added, "chunksSkipped": skipped, "collection": collection}
 

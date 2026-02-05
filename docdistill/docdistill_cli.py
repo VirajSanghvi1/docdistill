@@ -448,7 +448,11 @@ def main() -> int:
     ap_r.add_argument("--ollama-url", default=DEFAULT_OLLAMA_URL)
     ap_r.add_argument("--embed-model", default="nomic-embed-text")
     ap_r.add_argument("--embed-max-chars", type=int, default=800)
-    ap_r.add_argument("--skip-indexed", action="store_true")
+    ap_r.add_argument(
+        "--skip-indexed",
+        action="store_true",
+        help="Skip chunks already indexed (via .docdistill/index_cache.json)",
+    )
     ap_r.add_argument("--include-outlines", action="store_true")
     ap_r.add_argument("--include-kinds", default="")
     ap_r.add_argument("--exclude-kinds", default="")
@@ -503,7 +507,7 @@ def main() -> int:
             return set(parts) if parts else None
 
         distilled_root = Path(args.distilled).expanduser().resolve()
-        index_cache_path = distilled_root / ".docdistill" / "index_cache.json"
+        index_cache_path = (distilled_root / ".docdistill" / "index_cache.json") if args.skip_indexed else None
 
         res = index_distilled_dir(
             distilled_root=distilled_root,
@@ -826,7 +830,7 @@ def main() -> int:
     run_stats_path.write_text(json.dumps(stats, indent=2) + "\n", encoding="utf-8")
 
     # If this was `run`, perform indexing as step 2.
-    if should_index_after:
+    if should_index_after and stats["errors"] == 0:
         try:
             try:
                 from .vector_index import index_distilled_dir
@@ -837,7 +841,7 @@ def main() -> int:
                 parts = [p.strip() for p in (s or "").split(",") if p.strip()]
                 return set(parts) if parts else None
 
-            index_cache_path = out_root / ".docdistill" / "index_cache.json"
+            index_cache_path = (out_root / ".docdistill" / "index_cache.json") if bool(run_condense_args.skip_indexed) else None
 
             index_res = index_distilled_dir(
                 distilled_root=out_root,
@@ -858,6 +862,8 @@ def main() -> int:
         except Exception as e:
             print(f"ERROR: indexing failed: {e!r}", file=sys.stderr)
             return 1
+    elif should_index_after and stats["errors"] != 0:
+        print("NOTE: skipping indexing because condense reported errors", file=sys.stderr)
 
     return 0 if stats["errors"] == 0 else 1
 
