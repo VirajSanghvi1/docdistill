@@ -271,19 +271,36 @@ def validate_execution_notes(md: str) -> list[str]:
     return problems
 
 
-def shard_outline_to_nodes(*, outline_md: str, nodes_dir: Path, max_node_chars: int = 6000) -> list[Path]:
-    """Split by H2 headings into atomic-ish nodes."""
+def estimate_tokens(text: str) -> int:
+    """Very rough token estimate (good enough for sizing nodes)."""
+    return max(1, int(len(text) / 4))
+
+
+def shard_outline_to_nodes(
+    *,
+    outline_md: str,
+    nodes_dir: Path,
+    node_min_tokens: int = 200,
+    node_max_tokens: int = 600,
+    hard_max_chars: int = 24_000,
+) -> list[Path]:
+    """Split outline into small, embed-friendly topic nodes.
+
+    Strategy:
+    - Split by H2 headings (##)
+    - If a section is still too large, further split it by size into multiple nodes.
+    """
     nodes_dir.mkdir(parents=True, exist_ok=True)
 
     lines = outline_md.splitlines()
-    chunks: list[tuple[str, list[str]]] = []
+    sections: list[tuple[str, list[str]]] = []
     cur_title = "overview"
     cur_lines: list[str] = []
 
     def flush():
         nonlocal cur_title, cur_lines
         if cur_lines:
-            chunks.append((cur_title, cur_lines))
+            sections.append((cur_title, cur_lines))
         cur_lines = []
 
     for line in lines:
@@ -295,8 +312,7 @@ def shard_outline_to_nodes(*, outline_md: str, nodes_dir: Path, max_node_chars: 
             cur_lines.append(line)
     flush()
 
-    out_paths: list[Path] = []
-    for i, (title, c_lines) in enumerate(chunks, start=1):
+    def slugify(title: str, idx: int) -> str:
         slug = (
             title.lower()
             .replace("/", " ")
@@ -305,14 +321,50 @@ def shard_outline_to_nodes(*, outline_md: str, nodes_dir: Path, max_node_chars: 
             .replace("  ", " ")
             .strip()
         )
-        slug = "-".join([p for p in slug.split() if p])[:60] or f"section-{i}"
-        p = nodes_dir / f"{i:02d}-{slug}.md"
-        text = "\n".join(c_lines).strip() + "\n"
-        if len(text) > max_node_chars:
-            text = text[:max_node_chars] + "\n\n[TRUNCATED]\n"
-        p.write_text(text, encoding="utf-8")
-        out_paths.append(p)
+        slug = "-".join([p for p in slug.split() if p])[:60] or f"section-{idx}"
+        return slug
 
+    out_paths: list[Path] = []
+    out_i = 1
+
+    for sec_i, (title, sec_lines) in enumerate(sections, start=1):
+        sec_text = "\n".join(sec_lines).strip() + "\n"
+
+        # If the section is small enough, emit as one node.
+        if estimate_tokens(sec_text) <= node_max_tokens and len(sec_text) <= hard_max_chars:
+            p = nodes_dir / f"{out_i:02d}-{slugify(title, sec_i)}.md"
+            p.write_text(sec_text, encoding="utf-8")
+            out_paths.append(p)
+            out_i += 1
+            continue
+
+        # Otherwise, split into multiple nodes, preserving the section heading.
+        heading = sec_lines[0] if sec_lines and sec_lines[0].startswith("## ") else f"## {title}"
+        body = sec_lines[1:] if sec_lines and sec_lines[0].startswith("## ") else sec_lines
+
+        cur: list[str] = [heading]
+        for line in body:
+            candidate = "\n".join(cur + [line]).strip() + "\n"
+            if (estimate_tokens(candidate) > node_max_tokens or len(candidate) > hard_max_chars) and len(cur) > 1:
+                # Flush current chunk.
+                p = nodes_dir / f"{out_i:02d}-{slugify(title, sec_i)}-{out_i:02d}.md"
+                p.write_text("\n".join(cur).strip() + "\n", encoding="utf-8")
+                out_paths.append(p)
+                out_i += 1
+                cur = [heading, line]
+            else:
+                cur.append(line)
+
+        if len(cur) > 1:
+            p = nodes_dir / f"{out_i:02d}-{slugify(title, sec_i)}-{out_i:02d}.md"
+            text = "\n".join(cur).strip() + "\n"
+            if len(text) > hard_max_chars:
+                text = text[:hard_max_chars] + "\n\n[TRUNCATED]\n"
+            p.write_text(text, encoding="utf-8")
+            out_paths.append(p)
+            out_i += 1
+
+    # Optional: if we produced ultra-tiny nodes, we could merge them, but keep it simple for now.
     return out_paths
 
 
@@ -400,6 +452,8 @@ def main() -> int:
     ap_c.add_argument("--outline", action="store_true", help="Generate a loss-minimized outline first and summarize from it")
     ap_c.add_argument("--outline-max-tokens", type=int, default=5000)
     ap_c.add_argument("--nodes", action="store_true", help="Write outline shards + per-doc index linking nodes")
+    ap_c.add_argument("--node-min-tokens", type=int, default=200, help="Minimum target size for a node (approx tokens)")
+    ap_c.add_argument("--node-max-tokens", type=int, default=600, help="Maximum target size for a node (approx tokens)")
 
     ap_c.add_argument("--max-chars", type=int, default=180_000, help="Max extracted chars per file")
     ap_c.add_argument("--sleep-ms", type=int, default=0, help="Sleep between files (throttle)")
@@ -468,6 +522,8 @@ def main() -> int:
     ap_r.add_argument("--outline", action="store_true")
     ap_r.add_argument("--outline-max-tokens", type=int, default=5000)
     ap_r.add_argument("--nodes", action="store_true")
+    ap_r.add_argument("--node-min-tokens", type=int, default=200)
+    ap_r.add_argument("--node-max-tokens", type=int, default=600)
     ap_r.add_argument("--max-chars", type=int, default=180_000)
     ap_r.add_argument("--sleep-ms", type=int, default=0)
     ap_r.add_argument("--skip-existing", action="store_true")
@@ -710,7 +766,12 @@ def main() -> int:
                 source_for_stage_b = outline_md
 
                 if args.nodes:
-                    node_paths = shard_outline_to_nodes(outline_md=outline_md, nodes_dir=nodes_dir)
+                    node_paths = shard_outline_to_nodes(
+                        outline_md=outline_md,
+                        nodes_dir=nodes_dir,
+                        node_min_tokens=args.node_min_tokens,
+                        node_max_tokens=args.node_max_tokens,
+                    )
 
             exec_md = ""
             sum_md = ""
