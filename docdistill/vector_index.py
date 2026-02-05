@@ -39,7 +39,11 @@ def post_json(url: str, data: dict, timeout: int = 120) -> dict:
         raise RuntimeError(f"HTTP {e.code} calling {url}: {detail[:500]}")
 
 
-def ollama_embed(*, ollama_url: str, model: str, text: str, max_chars: int = 1800) -> list[float]:
+def ollama_embed(*, ollama_url: str, model: str, text: str, max_chars: int = 800) -> list[float]:
+    """Embed text with Ollama.
+
+    Embedding models have a context limit; we defensively truncate.
+    """
     if len(text) > max_chars:
         text = text[:max_chars] + "\n[TRUNCATED_FOR_EMBEDDING]"
     data = post_json(
@@ -187,6 +191,7 @@ def index_distilled_dir(
     collection: str,
     ollama_url: str,
     embed_model: str,
+    embed_max_chars: int = 800,
     sleep_ms: int = 0,
     include_outlines: bool = False,
     include_kinds: set[str] | None = None,
@@ -209,7 +214,7 @@ def index_distilled_dir(
     for p in files:
         chunks = file_to_chunks(file_path=p, collection=collection)
         for ch in chunks:
-            emb = ollama_embed(ollama_url=ollama_url, model=embed_model, text=ch.text)
+            emb = ollama_embed(ollama_url=ollama_url, model=embed_model, text=ch.text, max_chars=embed_max_chars)
             chroma_add(loc, cid, ids=[ch.id], documents=[ch.text], embeddings=[emb], metadatas=[ch.meta])
             added += 1
             if sleep_ms:
@@ -226,6 +231,7 @@ def query_distilled(
     collection: str,
     ollama_url: str,
     embed_model: str,
+    embed_max_chars: int = 800,
     top_k: int = 10,
     keyword_top_k: int = 10,
 ) -> dict:
@@ -233,7 +239,7 @@ def query_distilled(
     c = get_or_create_collection(loc, collection, space="cosine")
     cid = str(c["id"])
 
-    qemb = ollama_embed(ollama_url=ollama_url, model=embed_model, text=query)
+    qemb = ollama_embed(ollama_url=ollama_url, model=embed_model, text=query, max_chars=embed_max_chars)
     vec = chroma_query(loc, cid, query_embeddings=[qemb], n_results=top_k, include=["documents", "metadatas", "distances"])  # type: ignore
     kw = keyword_search(root=distilled_root, query=query, top_k=keyword_top_k)
     return {"vector": vec, "keyword": kw}

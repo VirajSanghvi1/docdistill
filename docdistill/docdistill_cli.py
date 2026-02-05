@@ -424,6 +424,7 @@ def main() -> int:
     ap_i.add_argument("--chroma-url", default="http://127.0.0.1:8100")
     ap_i.add_argument("--ollama-url", default="http://127.0.0.1:11434")
     ap_i.add_argument("--embed-model", default="nomic-embed-text")
+    ap_i.add_argument("--embed-max-chars", type=int, default=800, help="Max chars passed into embedding model")
     ap_i.add_argument("--sleep-ms", type=int, default=0)
     ap_i.add_argument("--include-outlines", action="store_true", help="Also index *.outline.md (default: skip)")
     ap_i.add_argument(
@@ -444,6 +445,7 @@ def main() -> int:
     ap_q.add_argument("--chroma-url", default="http://127.0.0.1:8100")
     ap_q.add_argument("--ollama-url", default="http://127.0.0.1:11434")
     ap_q.add_argument("--embed-model", default="nomic-embed-text")
+    ap_q.add_argument("--embed-max-chars", type=int, default=800, help="Max chars passed into embedding model")
     ap_q.add_argument("--top-k", type=int, default=10)
     ap_q.add_argument("--keyword-top-k", type=int, default=10)
     ap_q.add_argument("query", help="Search query")
@@ -464,6 +466,7 @@ def main() -> int:
             collection=args.collection,
             ollama_url=args.ollama_url,
             embed_model=args.embed_model,
+            embed_max_chars=args.embed_max_chars,
             sleep_ms=args.sleep_ms,
             include_outlines=bool(args.include_outlines),
             include_kinds=_parse_csv_set(args.include_kinds),
@@ -483,6 +486,7 @@ def main() -> int:
             collection=args.collection,
             ollama_url=args.ollama_url,
             embed_model=args.embed_model,
+            embed_max_chars=args.embed_max_chars,
             top_k=args.top_k,
             keyword_top_k=args.keyword_top_k,
         )
