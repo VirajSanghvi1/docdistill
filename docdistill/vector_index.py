@@ -5,16 +5,27 @@ import urllib.error
 import subprocess
 import time
 import urllib.request
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
 try:
     # Package context
-    from .chroma_rest import ChromaLoc, add as chroma_add, get_or_create_collection, query as chroma_query
+    from .chroma_rest import (
+        ChromaLoc,
+        get_or_create_collection,
+        query as chroma_query,
+        upsert as chroma_upsert,
+    )
 except ImportError:  # pragma: no cover
     # Script context (python docdistill/vector_index.py)
-    from chroma_rest import ChromaLoc, add as chroma_add, get_or_create_collection, query as chroma_query
+    from chroma_rest import (
+        ChromaLoc,
+        get_or_create_collection,
+        query as chroma_query,
+        upsert as chroma_upsert,
+    )
 
 
 DEFAULT_CHROMA_URL = "http://127.0.0.1:8100"
@@ -27,6 +38,10 @@ class Chunk:
     id: str
     text: str
     meta: dict
+
+
+def _sha256_text(s: str) -> str:
+    return hashlib.sha256(s.encode("utf-8", errors="ignore")).hexdigest()
 
 
 def post_json(url: str, data: dict, timeout: int = 120) -> dict:
@@ -44,16 +59,21 @@ def post_json(url: str, data: dict, timeout: int = 120) -> dict:
         raise RuntimeError(f"HTTP {e.code} calling {url}: {detail[:500]}")
 
 
+def _embed_input(text: str, *, max_chars: int) -> str:
+    if len(text) > max_chars:
+        return text[:max_chars] + "\n[TRUNCATED_FOR_EMBEDDING]"
+    return text
+
+
 def ollama_embed(*, ollama_url: str, model: str, text: str, max_chars: int = 800) -> list[float]:
     """Embed text with Ollama.
 
     Embedding models have a context limit; we defensively truncate.
     """
-    if len(text) > max_chars:
-        text = text[:max_chars] + "\n[TRUNCATED_FOR_EMBEDDING]"
+    prompt = _embed_input(text, max_chars=max_chars)
     data = post_json(
         f"{ollama_url}/api/embeddings",
-        {"model": model, "prompt": text},
+        {"model": model, "prompt": prompt},
         timeout=600,
     )
     emb = data.get("embedding")
@@ -129,7 +149,7 @@ def kind_from_name(name: str) -> str:
     return "md"
 
 
-def file_to_chunks(*, file_path: Path, collection: str) -> list[Chunk]:
+def file_to_chunks(*, distilled_root: Path, file_path: Path, collection: str) -> list[Chunk]:
     text = file_path.read_text(encoding="utf-8", errors="ignore")
     max_chars = 3500
 
@@ -153,15 +173,18 @@ def file_to_chunks(*, file_path: Path, collection: str) -> list[Chunk]:
             for i in range(0, len(c), max_chars):
                 final.append(c[i : i + max_chars])
 
+    rel_path = file_path.relative_to(distilled_root).as_posix()
+
     out: list[Chunk] = []
     for i, c in enumerate(final):
-        cid = f"{collection}:{file_path.as_posix()}::{i}"
+        cid = f"{collection}:{rel_path}::{i}"
         out.append(
             Chunk(
                 id=cid,
                 text=c,
                 meta={
                     "path": str(file_path),
+                    "rel_path": rel_path,
                     "name": file_path.name,
                     "kind": kind_from_name(file_path.name),
                 },
@@ -203,6 +226,8 @@ def index_distilled_dir(
     include_outlines: bool = False,
     include_kinds: set[str] | None = None,
     exclude_kinds: set[str] | None = None,
+    index_cache_path: Path | None = None,
+    skip_indexed: bool = False,
 ) -> dict:
     loc = ChromaLoc(base_url=chroma_url)
     c = get_or_create_collection(loc, collection, space="cosine")
@@ -217,17 +242,65 @@ def index_distilled_dir(
         )
     )
 
+    cache: dict = {}
+    if index_cache_path is not None and index_cache_path.exists():
+        try:
+            cache = json.loads(index_cache_path.read_text(encoding="utf-8"))
+        except Exception:
+            cache = {}
+
+    # Invalidate cache if it was generated for a different target.
+    cache_meta = cache.get("__meta__") if isinstance(cache, dict) else None
+    if isinstance(cache_meta, dict):
+        if cache_meta.get("collection") != collection or cache_meta.get("chroma_url") != chroma_url:
+            cache = {}
+
     added = 0
+    skipped = 0
     for p in files:
-        chunks = file_to_chunks(file_path=p, collection=collection)
+        chunks = file_to_chunks(distilled_root=distilled_root, file_path=p, collection=collection)
         for ch in chunks:
+            key = ch.id
+            prompt = _embed_input(ch.text, max_chars=embed_max_chars)
+            h = _sha256_text(prompt)
+            cached = cache.get(key) if isinstance(cache, dict) else None
+            if (
+                skip_indexed
+                and isinstance(cached, dict)
+                and cached.get("sha256") == h
+                and cached.get("embed_model") == embed_model
+                and int(cached.get("embed_max_chars") or embed_max_chars) == embed_max_chars
+            ):
+                skipped += 1
+                continue
+
             emb = ollama_embed(ollama_url=ollama_url, model=embed_model, text=ch.text, max_chars=embed_max_chars)
-            chroma_add(loc, cid, ids=[ch.id], documents=[ch.text], embeddings=[emb], metadatas=[ch.meta])
+            chroma_upsert(loc, cid, ids=[ch.id], documents=[ch.text], embeddings=[emb], metadatas=[ch.meta])
             added += 1
+
+            if index_cache_path is not None:
+                cache[key] = {
+                    "sha256": h,
+                    "embed_model": embed_model,
+                    "embed_max_chars": embed_max_chars,
+                    "updatedAt": int(time.time()),
+                }
+
             if sleep_ms:
                 time.sleep(sleep_ms / 1000.0)
 
-    return {"files": len(files), "chunksAdded": added, "collection": collection}
+    if index_cache_path is not None:
+        cache["__meta__"] = {
+            "collection": collection,
+            "chroma_url": chroma_url,
+            "updatedAt": int(time.time()),
+        }
+        index_cache_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = index_cache_path.with_suffix(index_cache_path.suffix + ".tmp")
+        tmp.write_text(json.dumps(cache, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        tmp.replace(index_cache_path)
+
+    return {"files": len(files), "chunksAdded": added, "chunksSkipped": skipped, "collection": collection}
 
 
 def query_distilled(

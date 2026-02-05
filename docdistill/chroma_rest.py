@@ -74,6 +74,26 @@ def add(
     _req_json("POST", url, body, timeout=600)
 
 
+def upsert(
+    loc: ChromaLoc,
+    collection_id: str,
+    *,
+    ids: list[str],
+    documents: list[str],
+    embeddings: list[list[float]],
+    metadatas: list[dict] | None = None,
+) -> None:
+    """Upsert records into a collection.
+
+    Chroma's /upsert updates existing ids and inserts new ones.
+    """
+    url = f"{loc.collections_url()}/{collection_id}/upsert"
+    body: dict = {"ids": ids, "documents": documents, "embeddings": embeddings}
+    if metadatas is not None:
+        body["metadatas"] = metadatas
+    _req_json("POST", url, body, timeout=600)
+
+
 def query(
     loc: ChromaLoc,
     collection_id: str,
