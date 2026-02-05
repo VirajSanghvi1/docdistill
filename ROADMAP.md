@@ -1,4 +1,4 @@
-# DocDistill Roadmap
+# RAGLite Roadmap
 
 This roadmap is intentionally specific and low-hype. It reflects what’s implemented today and what’s next.
 
@@ -13,7 +13,7 @@ This roadmap is intentionally specific and low-hype. It reflects what’s implem
 ### Local-first storage and retrieval
 - Named datasets via `--collection`
 - **Hybrid search**: vector (Chroma) + keyword (ripgrep)
-- Incremental-ish indexing with `--skip-indexed` + `.docdistill/index_cache.json`
+- Incremental-ish indexing with `--skip-indexed` + `.raglite/index_cache.json`
 
 ### Engines
 - **OpenClaw engine** support
@@ -39,8 +39,8 @@ This roadmap is intentionally specific and low-hype. It reflects what’s implem
 - Optional reranking (local model)
 
 ### UX
-- `docdistill doctor` to validate environment
-- `docdistill config` (defaults for engine, chroma url, collection)
+- `raglite doctor` to validate environment
+- `raglite config` (defaults for engine, chroma url, collection)
 
 ---
 

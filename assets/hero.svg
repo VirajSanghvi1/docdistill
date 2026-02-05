@@ -20,7 +20,7 @@
   <rect class="bg" x="0" y="0" width="1200" height="630"/>
 
   <text class="title" x="80" y="120">Compress first. Index second.</text>
-  <text class="muted" x="80" y="162">DocDistill turns verbose docs into LLM-ready Markdown, then makes them searchable.</text>
+  <text class="muted" x="80" y="162">RAGLite turns verbose docs into structured Markdown, then makes them searchable.</text>
 
   <!-- Pipeline cards -->
   <rect class="card" x="80" y="220" width="300" height="260" rx="16"/>

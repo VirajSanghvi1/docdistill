@@ -19,7 +19,7 @@ try:
         upsert as chroma_upsert,
     )
 except ImportError:  # pragma: no cover
-    # Script context (python docdistill/vector_index.py)
+    # Script context
     from chroma_rest import (
         ChromaLoc,
         get_or_create_collection,
@@ -115,7 +115,7 @@ def iter_md_files(
         return "md"
 
     for p in root.rglob("*.md"):
-        if not p.is_file() or ".docdistill" in p.parts:
+        if not p.is_file() or ".raglite" in p.parts:
             continue
 
         k = kind_for(p)
