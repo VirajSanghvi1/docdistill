@@ -410,7 +410,7 @@ def write_root_index(*, out_root: Path, input_root: Path, doc_indices: list[Path
     """Human-browsable top index that links to per-doc indices."""
     index_path = out_root / "index.md"
     lines: list[str] = []
-    lines.append("# DocDistill Index")
+    lines.append("# RAGLite Index")
     lines.append("")
     lines.append(f"- Source: `{input_root}`")
     lines.append(f"- Generated: {time.strftime('%Y-%m-%d %H:%M:%S %Z', time.localtime())}")
@@ -447,13 +447,13 @@ def cli() -> None:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="DocDistill CLI")
+    ap = argparse.ArgumentParser(description="RAGLite CLI")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     # --- Condense ---
     ap_c = sub.add_parser("condense", help="Extract + distill docs into markdown artifacts")
     ap_c.add_argument("input", help="File or directory to process")
-    ap_c.add_argument("--out", default="./docdistill_out", help="Output directory")
+    ap_c.add_argument("--out", default="./raglite_out", help="Output directory")
 
     ap_c.add_argument("--engine", choices=["ollama", "openclaw"], default="ollama", help="Generation engine")
 
@@ -509,12 +509,12 @@ def main() -> int:
         default="",
         help="Comma-separated kinds to exclude. Kinds: node,tool-summary,execution-notes,index,root-index,outline,md",
     )
-    ap_i.add_argument("--skip-indexed", action="store_true", help="Skip chunks already indexed (via .docdistill/index_cache.json)")
+    ap_i.add_argument("--skip-indexed", action="store_true", help="Skip chunks already indexed (via .raglite/index_cache.json)")
 
     # --- Run (condense + index) ---
     ap_r = sub.add_parser("run", help="One-command pipeline: condense then index into a single Chroma collection")
     ap_r.add_argument("input", help="File or directory to process")
-    ap_r.add_argument("--out", default="./docdistill_out", help="Output directory")
+    ap_r.add_argument("--out", default="./raglite_out", help="Output directory")
     ap_r.add_argument("--collection", required=True, help="Chroma collection name")
     ap_r.add_argument("--chroma-url", default="http://127.0.0.1:8100")
     ap_r.add_argument("--ollama-url", default=DEFAULT_OLLAMA_URL)
@@ -523,7 +523,7 @@ def main() -> int:
     ap_r.add_argument(
         "--skip-indexed",
         action="store_true",
-        help="Skip chunks already indexed (via .docdistill/index_cache.json)",
+        help="Skip chunks already indexed (via .raglite/index_cache.json)",
     )
     ap_r.add_argument("--include-outlines", action="store_true")
     ap_r.add_argument("--include-kinds", default="")
@@ -575,14 +575,14 @@ def main() -> int:
         try:
             from .vector_index import index_distilled_dir
         except ImportError:  # pragma: no cover
-            from vector_index import index_distilled_dir
+            from raglite.vector_index import index_distilled_dir
 
         def _parse_csv_set(s: str) -> set[str] | None:
             parts = [p.strip() for p in (s or "").split(",") if p.strip()]
             return set(parts) if parts else None
 
         distilled_root = Path(args.distilled).expanduser().resolve()
-        index_cache_path = (distilled_root / ".docdistill" / "index_cache.json") if args.skip_indexed else None
+        index_cache_path = (distilled_root / ".raglite" / "index_cache.json") if args.skip_indexed else None
 
         res = index_distilled_dir(
             distilled_root=distilled_root,
@@ -606,7 +606,7 @@ def main() -> int:
         try:
             from .vector_index import query_distilled
         except ImportError:  # pragma: no cover
-            from vector_index import query_distilled
+            from raglite.vector_index import query_distilled
 
         res = query_distilled(
             query=args.query,
@@ -641,7 +641,7 @@ def main() -> int:
     out_root = Path(args.out).expanduser().resolve()
     out_root.mkdir(parents=True, exist_ok=True)
 
-    meta_dir = out_root / ".docdistill"
+    meta_dir = out_root / ".raglite"
     cache_path = meta_dir / "cache.json"
     errors_log = meta_dir / "errors.log"
     run_stats_path = meta_dir / "run_stats.json"
@@ -718,7 +718,7 @@ def main() -> int:
             try:
                 from .extract import extract_file
             except ImportError:  # pragma: no cover
-                from extract import extract_file
+                from raglite.extract import extract_file
 
             extracted = extract_file(p)
             text = extracted.text
@@ -916,13 +916,13 @@ def main() -> int:
             try:
                 from .vector_index import index_distilled_dir
             except ImportError:  # pragma: no cover
-                from vector_index import index_distilled_dir
+                from raglite.vector_index import index_distilled_dir
 
             def _parse_csv_set(s: str) -> set[str] | None:
                 parts = [p.strip() for p in (s or "").split(",") if p.strip()]
                 return set(parts) if parts else None
 
-            index_cache_path = (out_root / ".docdistill" / "index_cache.json") if bool(run_condense_args.skip_indexed) else None
+            index_cache_path = (out_root / ".raglite" / "index_cache.json") if bool(run_condense_args.skip_indexed) else None
 
             index_res = index_distilled_dir(
                 distilled_root=out_root,

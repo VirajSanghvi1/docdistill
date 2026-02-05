@@ -1,15 +1,15 @@
-# DocDistill
+# RAGLite
 
 <p align="center">
-  <img src="assets/hero.svg" alt="DocDistill: Compress first. Index second." width="900" />
+  <img src="assets/hero.svg" alt="RAGLite: Compress first. Index second." width="900" />
 </p>
 
-DocDistill is a local-first CLI that turns a folder of docs (PDF/HTML/TXT/MD) into **structured, low-fluff Markdown** — and then makes it searchable with **Chroma** 🧠 + **ripgrep** 🔎.
+RAGLite is a local-first CLI that turns a folder of docs (PDF/HTML/TXT/MD) into **structured, low-fluff Markdown** — and then makes it searchable with **Chroma** 🧠 + **ripgrep** 🔎.
 
 Core idea: **compression-before-embeddings** ✂️➡️🧠
 
 <p align="center">
-  <img src="assets/diagram.svg" alt="DocDistill workflow: condense, index, query" width="900" />
+  <img src="assets/diagram.svg" alt="RAGLite workflow: condense, index, query" width="900" />
 </p>
 
 ## What you get
@@ -19,19 +19,19 @@ For each input file:
 - `*.tool-summary.md` — compact index entry (purpose, capabilities, entrypoints, footguns)
 
 Optionally:
-- `docdistill index` stores embeddings in **Chroma** 🧠 (one DB, many collections)
-- `docdistill query` runs **hybrid search** 🔎 (vector + keyword)
+- `raglite index` stores embeddings in **Chroma** 🧠 (one DB, many collections)
+- `raglite query` runs **hybrid search** 🔎 (vector + keyword)
 
 ## Why local + open-source?
 
-If you want a private, local setup (no managed “fancy vector DB” required), DocDistill keeps everything on your machine:
+If you want a private, local setup (no managed “fancy vector DB” required), RAGLite keeps everything on your machine:
 - Distilled Markdown artifacts are plain files you can audit + version control
 - Indexing uses **Chroma** (open-source, local) and keyword search uses **ripgrep**
 - You can still swap in a hosted vector DB later if you outgrow local
 
 ## Engines
 
-DocDistill supports two backends:
+RAGLite supports two backends:
 
 - **OpenClaw (recommended):** uses your local OpenClaw Gateway `/v1/responses` endpoint for higher-quality, format-following condensation.
 - **Ollama:** uses `POST /api/generate` for fully local inference (often less reliable at strict templates).
@@ -58,19 +58,19 @@ pip install -e .
 
 ```bash
 # 0) Setup
-cd ~/Projects/docdistill
+cd ~/Projects/raglite
 source .venv/bin/activate
 
 # 1) Condense → Index (one command)
-docdistill run /path/to/docs \
-  --out ./docdistill_out \
+raglite run /path/to/docs \
+  --out ./raglite_out \
   --engine ollama --ollama-model llama3.2:3b \
   --collection my-docs \
   --chroma-url http://127.0.0.1:8100 \
   --skip-indexed
 
 # 2) Query
-docdistill query ./docdistill_out \
+raglite query ./raglite_out \
   --collection my-docs \
   "rollback procedure"
 ```
@@ -80,8 +80,8 @@ docdistill query ./docdistill_out \
 ### 1) Distill docs ✍️
 
 ```bash
-docdistill condense /path/to/docs \
-  --out ./docdistill_out \
+raglite condense /path/to/docs \
+  --out ./raglite_out \
   --engine openclaw
 ```
 
@@ -90,7 +90,7 @@ docdistill condense /path/to/docs \
 ### 2) Index distilled output (Chroma)
 
 ```bash
-docdistill index ./docdistill_out \
+raglite index ./raglite_out \
   --collection my-docs \
   --chroma-url http://127.0.0.1:8100
 ```
@@ -98,7 +98,7 @@ docdistill index ./docdistill_out \
 ### 3) Query (hybrid)
 
 ```bash
-docdistill query ./docdistill_out \
+raglite query ./raglite_out \
   --collection my-docs \
   --top-k 5 \
   --keyword-top-k 5 \
@@ -116,12 +116,14 @@ docdistill query ./docdistill_out \
 
 ## Output layout
 
-DocDistill preserves folder structure under your `--out` dir:
+RAGLite preserves folder structure under your `--out` dir:
 
 ```text
 <out>/
   some/subdir/file.execution-notes.md
   some/subdir/file.tool-summary.md
+
+(Default output folder is `./raglite_out`.)
 ```
 
 ## Notes / gotchas
@@ -143,7 +145,7 @@ DocDistill preserves folder structure under your `--out` dir:
 - Detect deletions (prune removed chunks from Chroma)
 - Batch upserts to Chroma for speed
 - Better query output formatting (snippets + anchors)
-- `docdistill doctor` (dependency checks)
+- `raglite doctor` (dependency checks)
 
 (Full: [ROADMAP.md](ROADMAP.md))
 

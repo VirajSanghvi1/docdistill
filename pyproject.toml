@@ -3,14 +3,14 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "docdistill"
+name = "raglite"
 version = "0.1.0"
-description = "Local-first CLI to condense docs into LLM-ready Markdown and index/query with Chroma + hybrid search"
+description = "Local-first RAG-lite CLI: condense docs into structured Markdown, then index/query with Chroma + hybrid search"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "Viraj Sanghvi" }]
 license = { text = "MIT" }
-keywords = ["rag", "docs", "chroma", "ollama", "openclaw", "summarization"]
+keywords = ["rag", "docs", "chroma", "ollama", "openclaw", "summarization", "local-first"]
 dependencies = [
   "beautifulsoup4==4.12.3",
   "lxml==5.3.0",
@@ -18,11 +18,11 @@ dependencies = [
 ]
 
 [project.scripts]
-docdistill = "docdistill.docdistill_cli:cli"
+raglite = "raglite.raglite_cli:cli"
 
 [tool.setuptools]
 package-dir = {"" = "."}
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["docdistill*"]
+include = ["raglite*"]
