@@ -1,15 +1,33 @@
-# DocDistill 🪐
+# DocDistill
 
-DocDistill is a CLI that takes a folder full of docs (PDF/HTML/TXT/MD) and spits out **agent-friendly, low-fluff Markdown**.
+<p align="center">
+  <img src="assets/hero.svg" alt="DocDistill: Compress first. Index second." width="900" />
+</p>
 
-Think: *less textbook prose, more “what do I run / what do I call / what breaks / what matters.”*
+DocDistill is a local-first CLI that turns a folder of docs (PDF/HTML/TXT/MD) into **low-fluff, LLM-ready Markdown** — and can then **index + query** the distilled output.
 
-## What it generates
+Core idea: **compression-before-embeddings** ✂️➡️🧠
 
-For each input file, DocDistill generates two outputs:
+<p align="center">
+  <img src="assets/diagram.svg" alt="DocDistill workflow: condense, index, query" width="900" />
+</p>
 
-- `*.execution-notes.md` — operational notes for an executor agent (golden path, checks, failure modes)
-- `*.tool-summary.md` — ultra-condensed index entry (purpose, capabilities, entrypoints, footguns)
+## What you get
+
+For each input file:
+- `*.execution-notes.md` — practical run/operate notes (checks, failure modes, commands)
+- `*.tool-summary.md` — compact index entry (purpose, capabilities, entrypoints, footguns)
+
+Optionally:
+- `docdistill index` stores embeddings in **Chroma** 🧠 (one DB, many collections)
+- `docdistill query` runs **hybrid search** 🔎 (vector + keyword)
+
+## Why local + open-source?
+
+If you want a private, local setup (no managed “fancy vector DB” required), DocDistill keeps everything on your machine:
+- Distilled Markdown artifacts are plain files you can audit + version control
+- Indexing uses **Chroma** (open-source, local) and keyword search uses **ripgrep**
+- You can still swap in a hosted vector DB later if you outgrow local
 
 ## Engines
 
@@ -18,37 +36,65 @@ DocDistill supports two backends:
 - **OpenClaw (recommended):** uses your local OpenClaw Gateway `/v1/responses` endpoint for higher-quality, format-following condensation.
 - **Ollama:** uses `POST /api/generate` for fully local inference (often less reliable at strict templates).
 
+## Prereqs
+
+- **Python 3.11+**
+- An LLM engine:
+  - **OpenClaw** (recommended) 🪐, or
+  - **Ollama** 🦙
+- For search:
+  - **Chroma** (open-source, local) 🧠 at `http://127.0.0.1:8100`
+
 ## Install
 
 ```bash
-cd ~/Projects/docdistill
+# from repo root
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r docdistill/requirements.txt
 ```
 
-## Usage
-
-### Condense a folder (OpenClaw engine)
+## Quickstart (60s)
 
 ```bash
-cd ~/Projects/docdistill
-source .venv/bin/activate
+# 1) Distill
+python -m docdistill.docdistill_cli condense /path/to/docs --out ./docdistill_out --engine ollama --ollama-model llama3.2:3b
 
-python docdistill/docdistill_cli.py /path/to/docs \
-  --out ./docdistill_out \
-  --engine openclaw \
-  --summary-max-tokens 220 \
-  --exec-max-tokens 700
+# 2) Index (requires Chroma running)
+python -m docdistill.docdistill_cli index ./docdistill_out --collection my-docs --chroma-url http://127.0.0.1:8100
+
+# 3) Query
+python -m docdistill.docdistill_cli query ./docdistill_out --collection my-docs "rollback procedure"
 ```
 
-### Condense a folder (Ollama engine)
+## Usage
+
+### 1) Distill docs ✍️
 
 ```bash
-python docdistill/docdistill_cli.py /path/to/docs \
+python -m docdistill.docdistill_cli condense /path/to/docs \
   --out ./docdistill_out \
-  --engine ollama \
-  --ollama-model llama3.2:3b
+  --engine openclaw
+```
+
+(Or fully local: `--engine ollama --ollama-model llama3.2:3b`.)
+
+### 2) Index distilled output (Chroma)
+
+```bash
+python -m docdistill.docdistill_cli index ./docdistill_out \
+  --collection my-docs \
+  --chroma-url http://127.0.0.1:8100
+```
+
+### 3) Query (hybrid)
+
+```bash
+python -m docdistill.docdistill_cli query ./docdistill_out \
+  --collection my-docs \
+  --top-k 5 \
+  --keyword-top-k 5 \
+  "rollback procedure"
 ```
 
 ### Useful flags
@@ -70,15 +116,15 @@ DocDistill preserves folder structure under your `--out` dir:
 ## Notes / gotchas
 
 - PDF extraction is best-effort: scanned PDFs without embedded text won’t be great.
-- If you use `--engine openclaw`, DocDistill reads the Gateway token from `~/.openclaw/openclaw.json` if you don’t pass `--gateway-token`.
-- Token caps strongly affect information density — next step is a **hierarchical outline → shard → index** pipeline to avoid loss.
+- If you use `--engine openclaw`, pass `--gateway-token` or set `OPENCLAW_GATEWAY_TOKEN`.
+- Indexing defaults to high-signal artifacts (nodes/summaries/notes) and skips `*.outline.md` unless you opt in.
 
-## Roadmap (the fun part)
+## Roadmap (planned)
 
 - **Stage-1 outline** (loss-minimized, high budget)
 - **Atomic topic nodes** (200–600 token shards)
 - **`index.md` graph** (tiny navigational maps)
-- One-command pipeline: `docdistill condense <input> --levels N`
+- One-command pipeline (condense → index)
 
 ---
 
