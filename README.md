@@ -1,15 +1,22 @@
-# DocDistill 🪐
+# DocDistill
 
-DocDistill is a CLI that takes a folder full of docs (PDF/HTML/TXT/MD) and spits out **agent-friendly, low-fluff Markdown**.
+<p align="center">
+  <img src="assets/hero.svg" alt="DocDistill: Compress first. Index second." width="900" />
+</p>
 
-Think: *less textbook prose, more “what do I run / what do I call / what breaks / what matters.”*
+DocDistill is a local-first CLI that turns a folder of docs (PDF/HTML/TXT/MD) into **low-fluff, LLM-ready Markdown** — and can then **index + query** the distilled output.
 
-## What it generates
+Core idea: **compression-before-embeddings**.
 
-For each input file, DocDistill generates two outputs:
+## What you get
 
-- `*.execution-notes.md` — operational notes for an executor agent (golden path, checks, failure modes)
-- `*.tool-summary.md` — ultra-condensed index entry (purpose, capabilities, entrypoints, footguns)
+For each input file:
+- `*.execution-notes.md` — practical run/operate notes (checks, failure modes, commands)
+- `*.tool-summary.md` — compact index entry (purpose, capabilities, entrypoints, footguns)
+
+Optionally:
+- `docdistill index` stores embeddings in **Chroma** (one DB, many collections)
+- `docdistill query` runs **hybrid search** (vector + keyword)
 
 ## Engines
 
@@ -29,26 +36,35 @@ pip install -r docdistill/requirements.txt
 
 ## Usage
 
-### Condense a folder (OpenClaw engine)
+### 1) Distill docs
 
 ```bash
 cd ~/Projects/docdistill
 source .venv/bin/activate
 
-python docdistill/docdistill_cli.py /path/to/docs \
+python docdistill/docdistill_cli.py condense /path/to/docs \
   --out ./docdistill_out \
-  --engine openclaw \
-  --summary-max-tokens 220 \
-  --exec-max-tokens 700
+  --engine openclaw
 ```
 
-### Condense a folder (Ollama engine)
+(Or fully local: `--engine ollama --ollama-model llama3.2:3b`.)
+
+### 2) Index distilled output (Chroma)
 
 ```bash
-python docdistill/docdistill_cli.py /path/to/docs \
-  --out ./docdistill_out \
-  --engine ollama \
-  --ollama-model llama3.2:3b
+python docdistill/docdistill_cli.py index ./docdistill_out \
+  --collection my-docs \
+  --chroma-url http://127.0.0.1:8100
+```
+
+### 3) Query (hybrid)
+
+```bash
+python docdistill/docdistill_cli.py query ./docdistill_out \
+  --collection my-docs \
+  --top-k 5 \
+  --keyword-top-k 5 \
+  "rollback procedure"
 ```
 
 ### Useful flags
@@ -70,8 +86,8 @@ DocDistill preserves folder structure under your `--out` dir:
 ## Notes / gotchas
 
 - PDF extraction is best-effort: scanned PDFs without embedded text won’t be great.
-- If you use `--engine openclaw`, DocDistill reads the Gateway token from `~/.openclaw/openclaw.json` if you don’t pass `--gateway-token`.
-- Token caps strongly affect information density — next step is a **hierarchical outline → shard → index** pipeline to avoid loss.
+- If you use `--engine openclaw`, pass `--gateway-token` or set `OPENCLAW_GATEWAY_TOKEN`.
+- Indexing defaults to high-signal artifacts (nodes/summaries/notes) and skips `*.outline.md` unless you opt in.
 
 ## Roadmap (the fun part)
 
