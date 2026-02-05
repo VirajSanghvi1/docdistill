@@ -13,7 +13,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-from extract import extract_file
+# NOTE: extract deps (bs4/pypdf) are only needed for `condense`.
+# We import extract_file lazily inside the condense path so `index/query` can run without them.
 
 DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
 DEFAULT_OLLAMA_MODEL = "llama3.2:3b"
@@ -377,42 +378,123 @@ def save_cache(cache_path: Path, cache: dict) -> None:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="DocDistill CLI: extract docs -> execution-notes.md + tool-summary.md")
-    ap.add_argument("input", help="File or directory to process")
-    ap.add_argument("--out", default="./docdistill_out", help="Output directory")
+    ap = argparse.ArgumentParser(description="DocDistill CLI")
+    sub = ap.add_subparsers(dest="cmd", required=True)
 
-    ap.add_argument("--engine", choices=["ollama", "openclaw"], default="ollama", help="Generation engine")
+    # --- Condense ---
+    ap_c = sub.add_parser("condense", help="Extract + distill docs into markdown artifacts")
+    ap_c.add_argument("input", help="File or directory to process")
+    ap_c.add_argument("--out", default="./docdistill_out", help="Output directory")
 
-    ap.add_argument("--ollama-url", default=DEFAULT_OLLAMA_URL)
-    ap.add_argument("--ollama-model", default=DEFAULT_OLLAMA_MODEL)
+    ap_c.add_argument("--engine", choices=["ollama", "openclaw"], default="ollama", help="Generation engine")
 
-    ap.add_argument("--gateway-url", default=DEFAULT_GATEWAY_URL)
-    ap.add_argument("--gateway-token", default=os.environ.get("OPENCLAW_GATEWAY_TOKEN", ""))
-    ap.add_argument("--gateway-agent-id", default="main")
+    ap_c.add_argument("--ollama-url", default=DEFAULT_OLLAMA_URL)
+    ap_c.add_argument("--ollama-model", default=DEFAULT_OLLAMA_MODEL)
 
-    ap.add_argument("--exec-max-tokens", type=int, default=1200)
-    ap.add_argument("--summary-max-tokens", type=int, default=350)
-    ap.add_argument("--outline", action="store_true", help="Generate a loss-minimized outline first and summarize from it")
-    ap.add_argument("--outline-max-tokens", type=int, default=5000)
-    ap.add_argument("--nodes", action="store_true", help="Write outline shards + per-doc index linking nodes")
+    ap_c.add_argument("--gateway-url", default=DEFAULT_GATEWAY_URL)
+    ap_c.add_argument("--gateway-token", default=os.environ.get("OPENCLAW_GATEWAY_TOKEN", ""))
+    ap_c.add_argument("--gateway-agent-id", default="main")
 
-    ap.add_argument("--max-chars", type=int, default=180_000, help="Max extracted chars per file")
-    ap.add_argument("--sleep-ms", type=int, default=0, help="Sleep between files (throttle)")
+    ap_c.add_argument("--exec-max-tokens", type=int, default=1200)
+    ap_c.add_argument("--summary-max-tokens", type=int, default=350)
+    ap_c.add_argument("--outline", action="store_true", help="Generate a loss-minimized outline first and summarize from it")
+    ap_c.add_argument("--outline-max-tokens", type=int, default=5000)
+    ap_c.add_argument("--nodes", action="store_true", help="Write outline shards + per-doc index linking nodes")
 
-    ap.add_argument("--skip-existing", action="store_true")
-    ap.add_argument("--only", choices=["all", "tool-summary", "execution-notes"], default="all")
+    ap_c.add_argument("--max-chars", type=int, default=180_000, help="Max extracted chars per file")
+    ap_c.add_argument("--sleep-ms", type=int, default=0, help="Sleep between files (throttle)")
 
-    ap.add_argument("--include", action="append", default=[], help="Glob(s) to include (default: all)")
-    ap.add_argument("--exclude", action="append", default=[], help="Glob(s) to exclude")
-    ap.add_argument("--max-files", type=int, default=0, help="Process at most N files (0 = no limit)")
+    ap_c.add_argument("--skip-existing", action="store_true")
+    ap_c.add_argument("--only", choices=["all", "tool-summary", "execution-notes"], default="all")
 
-    ap.add_argument("--retries", type=int, default=2)
-    ap.add_argument("--retry-sleep", type=float, default=1.5)
-    ap.add_argument("--max-errors", type=int, default=10)
-    ap.add_argument("--fail-fast", action="store_true")
-    ap.add_argument("--validate", action="store_true", help="Validate outputs; retry once if invalid")
+    ap_c.add_argument("--include", action="append", default=[], help="Glob(s) to include (default: all)")
+    ap_c.add_argument("--exclude", action="append", default=[], help="Glob(s) to exclude")
+    ap_c.add_argument("--max-files", type=int, default=0, help="Process at most N files (0 = no limit)")
+
+    ap_c.add_argument("--retries", type=int, default=2)
+    ap_c.add_argument("--retry-sleep", type=float, default=1.5)
+    ap_c.add_argument("--max-errors", type=int, default=10)
+    ap_c.add_argument("--fail-fast", action="store_true")
+    ap_c.add_argument("--validate", action="store_true", help="Validate outputs; retry once if invalid")
+
+    # --- Index ---
+    ap_i = sub.add_parser("index", help="Embed + store a distilled directory into Chroma (new collection)")
+    ap_i.add_argument("distilled", help="Distilled output directory (from condense)")
+    ap_i.add_argument("--collection", required=True, help="Chroma collection name")
+    ap_i.add_argument("--chroma-url", default="http://127.0.0.1:8100")
+    ap_i.add_argument("--ollama-url", default="http://127.0.0.1:11434")
+    ap_i.add_argument("--embed-model", default="nomic-embed-text")
+    ap_i.add_argument("--embed-max-chars", type=int, default=800, help="Max chars passed into embedding model")
+    ap_i.add_argument("--sleep-ms", type=int, default=0)
+    ap_i.add_argument("--include-outlines", action="store_true", help="Also index *.outline.md (default: skip)")
+    ap_i.add_argument(
+        "--include-kinds",
+        default="",
+        help="Comma-separated kinds to include (filters default set). Kinds: node,tool-summary,execution-notes,index,root-index,outline,md",
+    )
+    ap_i.add_argument(
+        "--exclude-kinds",
+        default="",
+        help="Comma-separated kinds to exclude. Kinds: node,tool-summary,execution-notes,index,root-index,outline,md",
+    )
+
+    # --- Query ---
+    ap_q = sub.add_parser("query", help="Hybrid search (vector + keyword) over an indexed distilled directory")
+    ap_q.add_argument("distilled", help="Distilled output directory")
+    ap_q.add_argument("--collection", required=True)
+    ap_q.add_argument("--chroma-url", default="http://127.0.0.1:8100")
+    ap_q.add_argument("--ollama-url", default="http://127.0.0.1:11434")
+    ap_q.add_argument("--embed-model", default="nomic-embed-text")
+    ap_q.add_argument("--embed-max-chars", type=int, default=800, help="Max chars passed into embedding model")
+    ap_q.add_argument("--top-k", type=int, default=10)
+    ap_q.add_argument("--keyword-top-k", type=int, default=10)
+    ap_q.add_argument("query", help="Search query")
 
     args = ap.parse_args()
+
+    # --- Index command ---
+    if args.cmd == "index":
+        from vector_index import index_distilled_dir
+
+        def _parse_csv_set(s: str) -> set[str] | None:
+            parts = [p.strip() for p in (s or "").split(",") if p.strip()]
+            return set(parts) if parts else None
+
+        res = index_distilled_dir(
+            distilled_root=Path(args.distilled).expanduser().resolve(),
+            chroma_url=args.chroma_url,
+            collection=args.collection,
+            ollama_url=args.ollama_url,
+            embed_model=args.embed_model,
+            embed_max_chars=args.embed_max_chars,
+            sleep_ms=args.sleep_ms,
+            include_outlines=bool(args.include_outlines),
+            include_kinds=_parse_csv_set(args.include_kinds),
+            exclude_kinds=_parse_csv_set(args.exclude_kinds),
+        )
+        print(json.dumps(res, indent=2))
+        return 0
+
+    # --- Query command ---
+    if args.cmd == "query":
+        from vector_index import query_distilled
+
+        res = query_distilled(
+            query=args.query,
+            distilled_root=Path(args.distilled).expanduser().resolve(),
+            chroma_url=args.chroma_url,
+            collection=args.collection,
+            ollama_url=args.ollama_url,
+            embed_model=args.embed_model,
+            embed_max_chars=args.embed_max_chars,
+            top_k=args.top_k,
+            keyword_top_k=args.keyword_top_k,
+        )
+        print(json.dumps(res, indent=2))
+        return 0
+
+    # --- Condense command ---
+    assert args.cmd == "condense"
 
     input_root = Path(args.input).expanduser().resolve()
     out_root = Path(args.out).expanduser().resolve()
@@ -492,6 +574,8 @@ def main() -> int:
         rel = p.name if input_root.is_file() else str(p.relative_to(input_root))
 
         try:
+            from extract import extract_file
+
             extracted = extract_file(p)
             text = extracted.text
             if len(text) > args.max_chars:
