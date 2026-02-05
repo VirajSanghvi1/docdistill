@@ -51,7 +51,7 @@ DocDistill supports two backends:
 # from repo root
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r docdistill/requirements.txt
+pip install -e .
 ```
 
 ## Quickstart (60s)
@@ -62,7 +62,7 @@ cd ~/Projects/docdistill
 source .venv/bin/activate
 
 # 1) Condense → Index (one command)
-python -m docdistill.docdistill_cli run /path/to/docs \
+docdistill run /path/to/docs \
   --out ./docdistill_out \
   --engine ollama --ollama-model llama3.2:3b \
   --collection my-docs \
@@ -70,7 +70,7 @@ python -m docdistill.docdistill_cli run /path/to/docs \
   --skip-indexed
 
 # 2) Query
-python -m docdistill.docdistill_cli query ./docdistill_out \
+docdistill query ./docdistill_out \
   --collection my-docs \
   "rollback procedure"
 ```
@@ -80,7 +80,7 @@ python -m docdistill.docdistill_cli query ./docdistill_out \
 ### 1) Distill docs ✍️
 
 ```bash
-python -m docdistill.docdistill_cli condense /path/to/docs \
+docdistill condense /path/to/docs \
   --out ./docdistill_out \
   --engine openclaw
 ```
@@ -90,7 +90,7 @@ python -m docdistill.docdistill_cli condense /path/to/docs \
 ### 2) Index distilled output (Chroma)
 
 ```bash
-python -m docdistill.docdistill_cli index ./docdistill_out \
+docdistill index ./docdistill_out \
   --collection my-docs \
   --chroma-url http://127.0.0.1:8100
 ```
@@ -98,7 +98,7 @@ python -m docdistill.docdistill_cli index ./docdistill_out \
 ### 3) Query (hybrid)
 
 ```bash
-python -m docdistill.docdistill_cli query ./docdistill_out \
+docdistill query ./docdistill_out \
   --collection my-docs \
   --top-k 5 \
   --keyword-top-k 5 \
