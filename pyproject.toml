@@ -3,8 +3,8 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "raglite"
-version = "1.0.0"
+name = "raglite-chromadb"
+version = "1.0.1"
 description = "Local-first RAG-lite CLI: condense docs into structured Markdown, then index/query with Chroma + hybrid search"
 readme = "README.md"
 requires-python = ">=3.11"
