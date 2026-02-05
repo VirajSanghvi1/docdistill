@@ -40,7 +40,7 @@ DocDistill supports two backends:
 
 - **Python 3.11+**
 - An LLM engine:
-  - **OpenClaw** (recommended) 🪐, or
+  - **OpenClaw** (recommended) 🦞, or
   - **Ollama** 🦙
 - For search:
   - **Chroma** (open-source, local) 🧠 at `http://127.0.0.1:8100`
@@ -132,7 +132,20 @@ DocDistill preserves folder structure under your `--out` dir:
 
 ## Roadmap
 
-See [ROADMAP.md](ROADMAP.md).
+### Current (implemented)
+- `condense` — condense/summarize documents into Markdown artifacts
+- `index` — chunk + embed + store in **Chroma** collections
+- `query` — retrieve relevant chunks (vector + keyword)
+- `run` — one-command pipeline (condense → index)
+- Outline + nodes + indices: `--outline`, `--nodes`, root `index.md` + per-doc `*.index.md`
+
+### Next (near-term)
+- Detect deletions (prune removed chunks from Chroma)
+- Batch upserts to Chroma for speed
+- Better query output formatting (snippets + anchors)
+- `docdistill doctor` (dependency checks)
+
+(Full: [ROADMAP.md](ROADMAP.md))
 
 ---
 
