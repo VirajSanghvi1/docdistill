@@ -6,7 +6,11 @@
 
 DocDistill is a local-first CLI that turns a folder of docs (PDF/HTML/TXT/MD) into **low-fluff, LLM-ready Markdown** — and can then **index + query** the distilled output.
 
-Core idea: **compression-before-embeddings**.
+Core idea: **compression-before-embeddings** ✂️➡️🧠
+
+<p align="center">
+  <img src="assets/diagram.svg" alt="DocDistill workflow: condense, index, query" width="900" />
+</p>
 
 ## What you get
 
@@ -15,8 +19,15 @@ For each input file:
 - `*.tool-summary.md` — compact index entry (purpose, capabilities, entrypoints, footguns)
 
 Optionally:
-- `docdistill index` stores embeddings in **Chroma** (one DB, many collections)
-- `docdistill query` runs **hybrid search** (vector + keyword)
+- `docdistill index` stores embeddings in **Chroma** 🧠 (one DB, many collections)
+- `docdistill query` runs **hybrid search** 🔎 (vector + keyword)
+
+## Why local + open-source?
+
+If you want a private, local setup (no managed “fancy vector DB” required), DocDistill keeps everything on your machine:
+- Distilled Markdown artifacts are plain files you can audit + version control
+- Indexing uses **Chroma** (open-source, local) and keyword search uses **ripgrep**
+- You can still swap in a hosted vector DB later if you outgrow local
 
 ## Engines
 

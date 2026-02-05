@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300">
+  <defs>
+    <style>
+      .bg { fill: #0b0f19; }
+      .box { fill: #121a2a; stroke: #22304a; stroke-width: 2; }
+      .title { fill: #e7eefc; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; font-size: 28px; font-weight: 700; }
+      .text { fill: #cdd8ee; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; font-size: 20px; }
+      .mono { fill: #9aa7bd; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 16px; }
+      .arrow { stroke: #7dd3fc; stroke-width: 4; fill: none; }
+    </style>
+    <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="10" refY="3" orient="auto">
+      <path d="M0,0 L10,3 L0,6 Z" fill="#7dd3fc"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1200" height="300" rx="18"/>
+
+  <rect class="box" x="60" y="70" width="310" height="160" rx="16"/>
+  <rect class="box" x="445" y="70" width="310" height="160" rx="16"/>
+  <rect class="box" x="830" y="70" width="310" height="160" rx="16"/>
+
+  <text class="title" x="95" y="115">1) Condense ✍️</text>
+  <text class="text" x="95" y="150">Docs → distilled Markdown</text>
+  <text class="mono" x="95" y="185">*.tool-summary.md</text>
+  <text class="mono" x="95" y="210">*.execution-notes.md</text>
+
+  <text class="title" x="480" y="115">2) Index 🧠</text>
+  <text class="text" x="480" y="150">Embeddings → Chroma</text>
+  <text class="mono" x="480" y="185">one DB, many collections</text>
+
+  <text class="title" x="865" y="115">3) Query 🔎</text>
+  <text class="text" x="865" y="150">Hybrid search</text>
+  <text class="mono" x="865" y="185">vector + keyword (rg)</text>
+
+  <line class="arrow" x1="370" y1="150" x2="445" y2="150" marker-end="url(#arrowhead)"/>
+  <line class="arrow" x1="755" y1="150" x2="830" y2="150" marker-end="url(#arrowhead)"/>
+</svg>
