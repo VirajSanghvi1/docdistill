@@ -36,24 +36,43 @@ DocDistill supports two backends:
 - **OpenClaw (recommended):** uses your local OpenClaw Gateway `/v1/responses` endpoint for higher-quality, format-following condensation.
 - **Ollama:** uses `POST /api/generate` for fully local inference (often less reliable at strict templates).
 
+## Prereqs
+
+- **Python 3.11+**
+- An LLM engine:
+  - **OpenClaw** (recommended) 🪐, or
+  - **Ollama** 🦙
+- For search:
+  - **Chroma** (open-source, local) 🧠 at `http://127.0.0.1:8100`
+
 ## Install
 
 ```bash
-cd ~/Projects/docdistill
+# from repo root
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r docdistill/requirements.txt
 ```
 
-## Usage
-
-### 1) Distill docs
+## Quickstart (60s)
 
 ```bash
-cd ~/Projects/docdistill
-source .venv/bin/activate
+# 1) Distill
+python -m docdistill.docdistill_cli condense /path/to/docs --out ./docdistill_out --engine ollama --ollama-model llama3.2:3b
 
-python docdistill/docdistill_cli.py condense /path/to/docs \
+# 2) Index (requires Chroma running)
+python -m docdistill.docdistill_cli index ./docdistill_out --collection my-docs --chroma-url http://127.0.0.1:8100
+
+# 3) Query
+python -m docdistill.docdistill_cli query ./docdistill_out --collection my-docs "rollback procedure"
+```
+
+## Usage
+
+### 1) Distill docs ✍️
+
+```bash
+python -m docdistill.docdistill_cli condense /path/to/docs \
   --out ./docdistill_out \
   --engine openclaw
 ```
@@ -63,7 +82,7 @@ python docdistill/docdistill_cli.py condense /path/to/docs \
 ### 2) Index distilled output (Chroma)
 
 ```bash
-python docdistill/docdistill_cli.py index ./docdistill_out \
+python -m docdistill.docdistill_cli index ./docdistill_out \
   --collection my-docs \
   --chroma-url http://127.0.0.1:8100
 ```
@@ -71,7 +90,7 @@ python docdistill/docdistill_cli.py index ./docdistill_out \
 ### 3) Query (hybrid)
 
 ```bash
-python docdistill/docdistill_cli.py query ./docdistill_out \
+python -m docdistill.docdistill_cli query ./docdistill_out \
   --collection my-docs \
   --top-k 5 \
   --keyword-top-k 5 \
@@ -100,12 +119,12 @@ DocDistill preserves folder structure under your `--out` dir:
 - If you use `--engine openclaw`, pass `--gateway-token` or set `OPENCLAW_GATEWAY_TOKEN`.
 - Indexing defaults to high-signal artifacts (nodes/summaries/notes) and skips `*.outline.md` unless you opt in.
 
-## Roadmap (the fun part)
+## Roadmap (planned)
 
 - **Stage-1 outline** (loss-minimized, high budget)
 - **Atomic topic nodes** (200–600 token shards)
 - **`index.md` graph** (tiny navigational maps)
-- One-command pipeline: `docdistill condense <input> --levels N`
+- One-command pipeline (condense → index)
 
 ---
 
