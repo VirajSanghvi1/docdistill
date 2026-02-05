@@ -441,6 +441,11 @@ def save_cache(cache_path: Path, cache: dict) -> None:
     cache_path.write_text(json.dumps(cache, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def cli() -> None:
+    """Console-script entrypoint."""
+    raise SystemExit(main())
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="DocDistill CLI")
     sub = ap.add_subparsers(dest="cmd", required=True)
