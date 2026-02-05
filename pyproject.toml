@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "docdistill"
+version = "0.1.0"
+description = "Local-first CLI to condense docs into LLM-ready Markdown and index/query with Chroma + hybrid search"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Viraj Sanghvi" }]
+license = { text = "MIT" }
+keywords = ["rag", "docs", "chroma", "ollama", "openclaw", "summarization"]
+dependencies = [
+  "beautifulsoup4==4.12.3",
+  "lxml==5.3.0",
+  "pypdf==5.2.0",
+]
+
+[project.scripts]
+docdistill = "docdistill.docdistill_cli:cli"
+
+[tool.setuptools]
+package-dir = {"" = "."}
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["docdistill*"]
