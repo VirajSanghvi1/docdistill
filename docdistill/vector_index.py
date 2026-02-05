@@ -12,10 +12,20 @@ from typing import Iterable
 
 try:
     # Package context
-    from .chroma_rest import ChromaLoc, add as chroma_add, get_or_create_collection, query as chroma_query
+    from .chroma_rest import (
+        ChromaLoc,
+        get_or_create_collection,
+        query as chroma_query,
+        upsert as chroma_upsert,
+    )
 except ImportError:  # pragma: no cover
     # Script context (python docdistill/vector_index.py)
-    from chroma_rest import ChromaLoc, add as chroma_add, get_or_create_collection, query as chroma_query
+    from chroma_rest import (
+        ChromaLoc,
+        get_or_create_collection,
+        query as chroma_query,
+        upsert as chroma_upsert,
+    )
 
 
 DEFAULT_CHROMA_URL = "http://127.0.0.1:8100"
@@ -139,7 +149,7 @@ def kind_from_name(name: str) -> str:
     return "md"
 
 
-def file_to_chunks(*, file_path: Path, collection: str) -> list[Chunk]:
+def file_to_chunks(*, distilled_root: Path, file_path: Path, collection: str) -> list[Chunk]:
     text = file_path.read_text(encoding="utf-8", errors="ignore")
     max_chars = 3500
 
@@ -163,15 +173,18 @@ def file_to_chunks(*, file_path: Path, collection: str) -> list[Chunk]:
             for i in range(0, len(c), max_chars):
                 final.append(c[i : i + max_chars])
 
+    rel_path = file_path.relative_to(distilled_root).as_posix()
+
     out: list[Chunk] = []
     for i, c in enumerate(final):
-        cid = f"{collection}:{file_path.as_posix()}::{i}"
+        cid = f"{collection}:{rel_path}::{i}"
         out.append(
             Chunk(
                 id=cid,
                 text=c,
                 meta={
                     "path": str(file_path),
+                    "rel_path": rel_path,
                     "name": file_path.name,
                     "kind": kind_from_name(file_path.name),
                 },
@@ -245,7 +258,7 @@ def index_distilled_dir(
     added = 0
     skipped = 0
     for p in files:
-        chunks = file_to_chunks(file_path=p, collection=collection)
+        chunks = file_to_chunks(distilled_root=distilled_root, file_path=p, collection=collection)
         for ch in chunks:
             key = ch.id
             prompt = _embed_input(ch.text, max_chars=embed_max_chars)
@@ -262,7 +275,7 @@ def index_distilled_dir(
                 continue
 
             emb = ollama_embed(ollama_url=ollama_url, model=embed_model, text=ch.text, max_chars=embed_max_chars)
-            chroma_add(loc, cid, ids=[ch.id], documents=[ch.text], embeddings=[emb], metadatas=[ch.meta])
+            chroma_upsert(loc, cid, ids=[ch.id], documents=[ch.text], embeddings=[emb], metadatas=[ch.meta])
             added += 1
 
             if index_cache_path is not None:
