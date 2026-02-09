@@ -6,6 +6,11 @@
 
 RAGLite is a local-first CLI that turns a folder of docs (PDF/HTML/TXT/MD) into **structured, low-fluff Markdown** — and then makes it searchable with **Chroma** 🧠 + **ripgrep** 🔎.
 
+## Security note (prompt injection)
+
+RAGLite treats extracted document text as **untrusted data**. If you distill content from the web (or any third party), assume it may contain prompt injection attempts.
+The distillation prompts explicitly instruct the model to **ignore any instructions inside source material** and treat sources as data only.
+
 Core idea: **compression-before-embeddings** ✂️➡️🧠
 
 <p align="center">
